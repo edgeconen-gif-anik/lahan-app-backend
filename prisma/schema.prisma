@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                   String     @id @default(uuid())
+  name                 String?
+  email                String?    @unique
+  role                 Role?
+  designation          Designation?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+  emailVerified        DateTime?
+  image                String?
+  password             String?
+  accounts             Account[]
+  sessions             Session[]
+
+  // User as a committee representative on a contract (the old `userID` relation)
+  contracts            Contract[] @relation("ContractCommitteeRep")
+
+  // User as site incharge on a Project
+  siteInchargeProjects Project[]  @relation("SiteIncharge")
+
+  // ✅ NEW: User as site incharge directly on a Contract
+  managedContracts     Contract[] @relation("ContractSiteIncharge")
+
+  // managedProjects   Project[]  @relation("ProjectManager")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Company {
+  id                      String          @id @default(uuid())
+  name                    String
+  panNumber               Int             @unique
+  address                 String
+  contactPerson           String?
+  phoneNumber             String?
+  email                   String?         @unique
+  registrationRequestDate DateTime?
+  registrationDate        DateTime?
+  category                CompanyCategory?
+  isContracted            Boolean         @default(false)
+  panVerified             Boolean         @default(false)
+  remarks                 String?
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+  voucherNo               String?
+  contracts               Contract[]
+  projects                Project[]
+
+  @@index([name])
+  @@index([panNumber])
+}
+
+model UserCommittee {
+  id            String              @id @default(uuid())
+  name          String
+  address       String
+  fiscalYear    String
+  formedDate    DateTime
+  bankName      String
+  accountNumber String
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  officials     CommitteeOfficial[]
+  contracts     Contract[]
+  projects      Project[]
+
+  @@index([name])
+  @@index([fiscalYear])
+}
+
+model CommitteeOfficial {
+  id                String        @id @default(uuid())
+  name              String
+  phoneNumber       String
+  role              CommitteeRole
+  userCommitteeId   String
+  createdAt         DateTime      @default(now())
+  citizenshipNumber String?
+  userCommittee     UserCommittee @relation(fields: [userCommitteeId], references: [id])
+}
+
+model Project {
+  id               String                   @id @default(uuid())
+  name             String                   @unique
+  type             String
+  budgetCode       String
+  source           String
+  fiscalYear       String
+  allocatedBudget  Decimal
+  internalBudget   Decimal                  @default(0)
+  centralBudget    Decimal                  @default(0)
+  provinceBudget   Decimal                  @default(0)
+  status           ProjectStatus            @default(NOT_STARTED)
+  implantedThrough ProjectImplantedThrough?
+  companyId        String?
+  userCommitteeId  String?
+  projectManagerId String?
+  siteInchargeId   String?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  sNo              String?
+  contracts        Contract[]
+  company          Company?                 @relation(fields: [companyId], references: [id])
+  siteIncharge     User?                    @relation("SiteIncharge", fields: [siteInchargeId], references: [id])
+  userCommittee    UserCommittee?           @relation(fields: [userCommitteeId], references: [id])
+  // projectManager User?                    @relation("ProjectManager", fields: [projectManagerId], references: [id])
+
+  @@index([status])
+  @@index([budgetCode])
+  @@index([fiscalYear])
+  @@index([siteInchargeId])
+}
+
+model Contract {
+  id                     String         @id @default(uuid())
+  projectId              String
+  companyId              String?
+  userID                 String?        // committee representative user
+  siteInchargeId         String?        // ✅ NEW: site incharge for this contract
+  contractNumber         String         @unique
+  contractAmount         Decimal
+  startDate              DateTime
+  intendedCompletionDate DateTime
+  actualCompletionDate   DateTime?
+  status                 ContractStatus @default(NOT_STARTED)
+  remarks                String?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  userCommitteeId        String?
+
+  agreement     Agreement?
+  workOrder     WorkOrder?
+  company       Company?       @relation(fields: [companyId], references: [id])
+  project       Project        @relation(fields: [projectId], references: [id])
+  userCommittee UserCommittee? @relation(fields: [userCommitteeId], references: [id])
+
+  // committee representative (existing)
+  user          User?          @relation("ContractCommitteeRep", fields: [userID], references: [id])
+
+  // ✅ NEW: site incharge directly on the contract
+  siteIncharge  User?          @relation("ContractSiteIncharge", fields: [siteInchargeId], references: [id])
+
+  @@index([projectId])
+  @@index([companyId])
+  @@index([userCommitteeId])
+  @@index([siteInchargeId]) // ✅ NEW: for fast filtering by site incharge
+}
+
+model Agreement {
+  id                  String    @id @default(uuid())
+  contractId          String    @unique
+  agreementDate       DateTime
+  content             String
+  amount              Decimal
+  contractorSignatory String?
+  officeSignatory     String?
+  witnessName         String?
+  contractorSignedAt  DateTime?
+  officeSignedAt      DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  contract            Contract  @relation(fields: [contractId], references: [id])
+}
+
+model WorkOrder {
+  id                  String   @id @default(uuid())
+  contractId          String   @unique
+  issuedDate          DateTime @default(now())
+  workCompletionDate  DateTime
+  content             String
+  contractorSignatory String?
+  officeSignatory     String?
+  witnessName         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  contract            Contract @relation(fields: [contractId], references: [id])
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum ProjectStatus {
+  NOT_STARTED
+  ONGOING
+  COMPLETED
+  ARCHIVED
+}
+
+enum ProjectImplantedThrough {
+  COMP
+  USER_COMMITTEE
+}
+
+enum CompanyCategory {
+  WORKS
+  SUPPLY
+  CONSULTING
+  OTHER
+}
+
+enum Role {
+  CREATOR
+  REVIEWER
+  ADMIN
+}
+
+enum Designation {
+  ASSISTANT_SUB_ENGINEER
+  SUB_ENGINEER
+  ENGINEER
+}
+
+enum CommitteeRole {
+  PRESIDENT
+  MEMBER
+  SECRETARY
+  TREASURER
+}
+
+enum ContractStatus {
+  NOT_STARTED
+  AGREEMENT
+  WORKORDER
+  WORKINPROGRESS
+  COMPLETED
+  ARCHIVED
+}
