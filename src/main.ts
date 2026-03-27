@@ -5,17 +5,33 @@ import { ZodValidationPipe } from 'nestjs-zod';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Enable Global Zod Validation
   app.useGlobalPipes(new ZodValidationPipe());
 
-  // Enable CORS (Cross-Origin Resource Sharing)
+  const allowedOrigins = [
+    'http://localhost:3000',
+    process.env.FRONTEND_URL,
+  ].filter((origin): origin is string => Boolean(origin));
+
+  const vercelPreviewPattern = /^https:\/\/.*\.vercel\.app$/;
+
   app.enableCors({
-    // ✅ FIXED: Added http:// to the origin
-    origin: 'http://localhost:3000', 
+    origin: (origin, callback) => {
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        vercelPreviewPattern.test(origin)
+      ) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error('Not allowed by CORS'));
+    },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
 
   await app.listen(process.env.PORT ?? 5000);
 }
+
 bootstrap();
