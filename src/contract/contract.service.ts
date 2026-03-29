@@ -9,6 +9,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateContractDto, UpdateContractDto } from './dto/contract.dto';
 import { Prisma } from '@prisma/client';
+import {
+  AuthUser,
+  getApprovalStateForSave,
+  getApprovalVisibilityWhere,
+  requireAdminUser,
+} from '../auth/auth-user';
 
 const CONTRACT_INCLUDE = {
   project: {
@@ -102,13 +108,14 @@ export class ContractService {
     return { contractNumber, sequence };
   }
 
-  async create(dto: CreateContractDto) {
+  async create(dto: CreateContractDto, user: AuthUser) {
     const { agreement, workOrder, contractAmount, ...rest } = dto;
 
     try {
       return await this.prisma.contract.create({
         data: {
           ...rest,
+          ...getApprovalStateForSave(user),
           contractAmount: new Prisma.Decimal(contractAmount),
           agreement: agreement
             ? {
@@ -141,7 +148,7 @@ export class ContractService {
     // Filters by contract's OWN siteInchargeId — not inherited from project.
     // Use GET /contracts?siteInchargeId=<uuid> to list all contracts for a user.
     siteInchargeId?:  string;
-  }) {
+  }, user: AuthUser) {
     const {
       projectId,
       companyId,
@@ -152,6 +159,7 @@ export class ContractService {
 
     return this.prisma.contract.findMany({
       where: {
+        ...getApprovalVisibilityWhere(user),
         ...(projectId       && { projectId }),
         ...(companyId       && { companyId }),
         ...(userCommitteeId && { userCommitteeId }),
@@ -163,17 +171,17 @@ export class ContractService {
     });
   }
 
-  async findOne(id: string) {
-    const contract = await this.prisma.contract.findUnique({
-      where: { id },
+  async findOne(id: string, user: AuthUser) {
+    const contract = await this.prisma.contract.findFirst({
+      where: { id, ...getApprovalVisibilityWhere(user) },
       include: CONTRACT_INCLUDE,
     });
     if (!contract) throw new NotFoundException(`Contract ${id} not found`);
     return contract;
   }
 
-  async update(id: string, dto: UpdateContractDto) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateContractDto, user: AuthUser) {
+    await this.findOne(id, user);
 
     const { agreement, workOrder, contractAmount, ...rest } = dto;
 
@@ -181,6 +189,7 @@ export class ContractService {
       where: { id },
       data: {
         ...rest,
+        ...getApprovalStateForSave(user),
         contractAmount: contractAmount != null
           ? new Prisma.Decimal(contractAmount)
           : undefined,
@@ -219,9 +228,26 @@ export class ContractService {
     });
   }
 
-  async remove(id: string) {
+  async approve(id: string, user: AuthUser) {
+    requireAdminUser(user);
+    await this.findOne(id, user);
+
+    return this.prisma.contract.update({
+      where: { id },
+      data: {
+        approvalStatus: 'APPROVED',
+        approvedAt: new Date(),
+      },
+      include: CONTRACT_INCLUDE,
+    });
+  }
+
+  async remove(id: string, user: AuthUser) {
+    requireAdminUser(user);
     return this.prisma.$transaction(async (tx) => {
-      const contract = await tx.contract.findUnique({ where: { id } });
+      const contract = await tx.contract.findFirst({
+        where: { id, ...getApprovalVisibilityWhere(user) },
+      });
       if (!contract) throw new NotFoundException('Contract not found');
 
       await tx.agreement.deleteMany({ where: { contractId: id } });

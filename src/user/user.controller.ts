@@ -1,76 +1,70 @@
-// src/user/user.controller.ts
 import {
-  Controller,
-  Get,
-  Post,
   Body,
-  Patch,
-  Param,
+  Controller,
   Delete,
-  Query,
-  UsePipes,
+  Get,
   HttpCode,
   HttpStatus,
+  Param,
   ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  Request,
+  UseGuards,
+  UsePipes,
 } from '@nestjs/common';
+import { ZodValidationPipe } from 'nestjs-zod';
 import { UserService } from './user.service';
 import { CreateUserDto, UpdateUserDto, QueryUserDto } from './dto/user.dto';
-import { ZodValidationPipe } from 'nestjs-zod';
+import { JwtAuthGuard } from '../auth/guard/jwt-auth.guard';
 
 @Controller('users')
+@UseGuards(JwtAuthGuard)
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
-  // POST /users
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @UsePipes(ZodValidationPipe)
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.userService.create(createUserDto);
+  create(@Body() createUserDto: CreateUserDto, @Request() req) {
+    return this.userService.create(createUserDto, req.user);
   }
 
-  // GET /users
   @Get()
   @UsePipes(ZodValidationPipe)
-  findAll(@Query() query: QueryUserDto) {
-    return this.userService.findAll(query);
+  findAll(@Query() query: QueryUserDto, @Request() req) {
+    return this.userService.findAll(query, req.user);
   }
 
-  // ⚠️ Literal sub-routes MUST come before :id — otherwise NestJS
-  //    treats "profile" / "dashboard" as a UUID param → wrong handler → 404
-
-  // GET /users/:id/profile  ✅ ADDED — was missing, causing 404
   @Get(':id/profile')
-  getProfile(@Param('id', ParseUUIDPipe) id: string) {
-    return this.userService.getProfile(id);
+  getProfile(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.userService.getProfile(id, req.user);
   }
 
-  // GET /users/:id/dashboard
   @Get(':id/dashboard')
-  getUserDashboard(@Param('id', ParseUUIDPipe) id: string) {
-    return this.userService.getUserDashboard(id);
+  getUserDashboard(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.userService.getUserDashboard(id, req.user);
   }
 
-  // GET /users/:id  — must stay AFTER the two sub-routes above
   @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.userService.findOne(id);
+  findOne(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.userService.findOne(id, req.user);
   }
 
-  // PATCH /users/:id
   @Patch(':id')
   @UsePipes(ZodValidationPipe)
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateUserDto: UpdateUserDto,
+    @Request() req,
   ) {
-    return this.userService.update(id, updateUserDto);
+    return this.userService.update(id, updateUserDto, req.user);
   }
 
-  // DELETE /users/:id
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.userService.remove(id);
+  remove(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.userService.remove(id, req.user);
   }
 }

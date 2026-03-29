@@ -1,15 +1,30 @@
-import { Injectable, ConflictException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCompanyDto, UpdateCompanyDto } from './dto/company.dto';
 import { Prisma } from '@prisma/client';
+import {
+  AuthUser,
+  getApprovalStateForSave,
+  getApprovalVisibilityWhere,
+  requireAdminUser,
+} from '../auth/auth-user';
 
 @Injectable()
 export class CompanyService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(data: CreateCompanyDto) {
+  async create(data: CreateCompanyDto, user: AuthUser) {
     try {
-      return await this.prisma.company.create({ data });
+      return await this.prisma.company.create({
+        data: {
+          ...data,
+          ...getApprovalStateForSave(user),
+        },
+      });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         // FIX: Safely access meta.target
@@ -37,9 +52,14 @@ export class CompanyService {
     }
   }
 
-  async findAll(params: { search?: string; category?: any }) {
+  async findAll(
+    params: { search?: string; category?: any },
+    user: AuthUser,
+  ) {
     const { search, category } = params;
-    const where: Prisma.CompanyWhereInput = {};
+    const where: Prisma.CompanyWhereInput = {
+      ...getApprovalVisibilityWhere(user),
+    };
 
     if (search) {
       const isNumber = !isNaN(Number(search));
@@ -57,21 +77,24 @@ export class CompanyService {
     });
   }
 
-  async findOne(id: string) {
-    const company = await this.prisma.company.findUnique({
-      where: { id },
+  async findOne(id: string, user: AuthUser) {
+    const company = await this.prisma.company.findFirst({
+      where: { id, ...getApprovalVisibilityWhere(user) },
       include: { projects: true },
     });
     if (!company) throw new NotFoundException(`Company ${id} not found`);
     return company;
   }
 
-  async update(id: string, data: UpdateCompanyDto) {
-    await this.findOne(id); // Ensure existence
+  async update(id: string, data: UpdateCompanyDto, user: AuthUser) {
+    await this.findOne(id, user);
     try {
       return await this.prisma.company.update({
         where: { id },
-        data,
+        data: {
+          ...data,
+          ...getApprovalStateForSave(user),
+        },
       });
     } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -87,8 +110,22 @@ export class CompanyService {
     }
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
+  async approve(id: string, user: AuthUser) {
+    requireAdminUser(user);
+    await this.findOne(id, user);
+
+    return this.prisma.company.update({
+      where: { id },
+      data: {
+        approvalStatus: 'APPROVED',
+        approvedAt: new Date(),
+      },
+    });
+  }
+
+  async remove(id: string, user: AuthUser) {
+    requireAdminUser(user);
+    await this.findOne(id, user);
     return this.prisma.company.delete({ where: { id } });
   }
 }

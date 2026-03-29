@@ -9,24 +9,25 @@ import {
   UpdateUserCommitteeDto,
   QueryUserCommitteeDto,
 } from './dto/user-committee.dto';
-import { Prisma, CommitteeRole } from '@prisma/client';
+import { CommitteeRole, Prisma } from '@prisma/client';
+import {
+  AuthUser,
+  getApprovalStateForSave,
+  getApprovalVisibilityWhere,
+  requireAdminUser,
+} from '../auth/auth-user';
 
 @Injectable()
 export class UserCommitteeService {
   constructor(private prisma: PrismaService) {}
 
-  // =====================================================
-  // 🔒 Leadership Role Validation (Business Rule)
-  // =====================================================
   private validateLeadershipRoles(
     officials?: {
       role: CommitteeRole;
     }[],
   ) {
     if (!officials || officials.length === 0) {
-      throw new BadRequestException(
-        'Committee must include officials.',
-      );
+      throw new BadRequestException('Committee must include officials.');
     }
 
     const leadershipCount = {
@@ -37,9 +38,7 @@ export class UserCommitteeService {
 
     for (const official of officials) {
       if (official.role in leadershipCount) {
-        leadershipCount[
-          official.role as keyof typeof leadershipCount
-        ]++;
+        leadershipCount[official.role as keyof typeof leadershipCount]++;
       }
     }
 
@@ -62,10 +61,7 @@ export class UserCommitteeService {
     }
   }
 
-  // ==========================
-  // 1️⃣ Create
-  // ==========================
-  async create(dto: CreateUserCommitteeDto) {
+  async create(dto: CreateUserCommitteeDto, user: AuthUser) {
     const { officials, formedDate, ...rest } = dto;
 
     this.validateLeadershipRoles(officials);
@@ -73,7 +69,8 @@ export class UserCommitteeService {
     return this.prisma.userCommittee.create({
       data: {
         ...rest,
-        formedDate: formedDate!, // required
+        formedDate: formedDate!,
+        ...getApprovalStateForSave(user),
         officials: {
           create: officials!,
         },
@@ -84,15 +81,13 @@ export class UserCommitteeService {
     });
   }
 
-  // ==========================
-  // 2️⃣ Find All
-  // ==========================
-  async findAll(query: QueryUserCommitteeDto) {
+  async findAll(query: QueryUserCommitteeDto, user: AuthUser) {
     const { search, fiscalYear, page, limit } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.UserCommitteeWhereInput = {
       AND: [
+        getApprovalVisibilityWhere(user),
         search
           ? {
               OR: [
@@ -134,12 +129,9 @@ export class UserCommitteeService {
     };
   }
 
-  // ==========================
-  // 3️⃣ Find One
-  // ==========================
-  async findOne(id: string) {
-    const committee = await this.prisma.userCommittee.findUnique({
-      where: { id },
+  async findOne(id: string, user: AuthUser) {
+    const committee = await this.prisma.userCommittee.findFirst({
+      where: { id, ...getApprovalVisibilityWhere(user) },
       include: {
         officials: true,
         projects: {
@@ -162,11 +154,8 @@ export class UserCommitteeService {
     return committee;
   }
 
-  // ==========================
-  // 4️⃣ Update
-  // ==========================
-  async update(id: string, dto: UpdateUserCommitteeDto) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateUserCommitteeDto, user: AuthUser) {
+    await this.findOne(id, user);
 
     const { officials, formedDate, ...rest } = dto;
 
@@ -178,6 +167,7 @@ export class UserCommitteeService {
       where: { id },
       data: {
         ...rest,
+        ...getApprovalStateForSave(user),
         ...(formedDate && { formedDate }),
         ...(officials && {
           officials: {
@@ -192,11 +182,25 @@ export class UserCommitteeService {
     });
   }
 
-  // ==========================
-  // 5️⃣ Delete
-  // ==========================
-  async remove(id: string) {
-    await this.findOne(id);
+  async approve(id: string, user: AuthUser) {
+    requireAdminUser(user);
+    await this.findOne(id, user);
+
+    return this.prisma.userCommittee.update({
+      where: { id },
+      data: {
+        approvalStatus: 'APPROVED',
+        approvedAt: new Date(),
+      },
+      include: {
+        officials: true,
+      },
+    });
+  }
+
+  async remove(id: string, user: AuthUser) {
+    requireAdminUser(user);
+    await this.findOne(id, user);
 
     return this.prisma.$transaction([
       this.prisma.committeeOfficial.deleteMany({

@@ -7,14 +7,18 @@ import {
   Patch,
   Post,
   Query,
+  Request,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Express } from 'express';
 import { ProjectService } from './project.service';
+import { JwtAuthGuard } from '../auth/guard/jwt-auth.guard';
 
 @Controller('projects')
+@UseGuards(JwtAuthGuard)
 export class ProjectController {
   constructor(private readonly projectService: ProjectService) {}
 
@@ -24,13 +28,13 @@ export class ProjectController {
   }
 
   @Get()
-  findAll(@Query() query: any) {
-    return this.projectService.findAll(query);
+  findAll(@Query() query: any, @Request() req) {
+    return this.projectService.findAll(query, req.user);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.projectService.findOne(id);
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.projectService.findOne(id, req.user);
   }
 
   @Patch(':id')

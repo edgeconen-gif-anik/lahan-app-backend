@@ -3,20 +3,42 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto, UpdateUserDto, QueryUserDto } from './dto/user.dto';
 import * as bcrypt from 'bcrypt';
-import { Prisma } from '@prisma/client';
+import { ApprovalStatus, Prisma } from '@prisma/client';
+import { AuthUser, isAdminUser, requireAdminUser } from '../auth/auth-user';
 
 @Injectable()
 export class UserService {
   constructor(private prisma: PrismaService) {}
 
+  private requireSelfOrAdmin(targetUserId: string, requester: AuthUser) {
+    if (requester.id === targetUserId || isAdminUser(requester)) {
+      return;
+    }
+
+    throw new ForbiddenException('You do not have access to this user');
+  }
+
+  private getApprovedContractWhere(requester: AuthUser): Prisma.ContractWhereInput {
+    if (isAdminUser(requester)) {
+      return {};
+    }
+
+    return {
+      approvalStatus: ApprovalStatus.APPROVED,
+    };
+  }
+
   /* ───────────────────────────────────────────
      1. Create User
   ─────────────────────────────────────────── */
-  async create(createUserDto: CreateUserDto) {
+  async create(createUserDto: CreateUserDto, requester: AuthUser) {
+    requireAdminUser(requester);
+
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
     });
@@ -41,7 +63,9 @@ export class UserService {
   /* ───────────────────────────────────────────
      2. Find All (Search, Filter, Paginate)
   ─────────────────────────────────────────── */
-  async findAll(query: QueryUserDto) {
+  async findAll(query: QueryUserDto, requester: AuthUser) {
+    requireAdminUser(requester);
+
     const { search, designation, role, page, limit } = query;
     const skip = (page - 1) * limit;
 
@@ -94,7 +118,9 @@ export class UserService {
   /* ───────────────────────────────────────────
      3. Find One (basic info)
   ─────────────────────────────────────────── */
-  async findOne(id: string) {
+  async findOne(id: string, requester: AuthUser) {
+    this.requireSelfOrAdmin(id, requester);
+
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -121,7 +147,10 @@ export class UserService {
         Returns projects as site incharge + nested
         contracts + computed stats per project
   ─────────────────────────────────────────── */
-  async getProfile(id: string) {
+  async getProfile(id: string, requester: AuthUser) {
+    this.requireSelfOrAdmin(id, requester);
+    const approvedContractWhere = this.getApprovedContractWhere(requester);
+
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -150,6 +179,7 @@ export class UserService {
 
             // All contracts under each project
             contracts: {
+              where: approvedContractWhere,
               select: {
                 id:                     true,
                 contractNumber:         true,
@@ -176,6 +206,7 @@ export class UserService {
         // ✅ Contracts directly assigned to this user as site incharge
         // Relation name from schema: "ContractSiteIncharge"
         managedContracts: {
+          where: approvedContractWhere,
           select: {
             id:                     true,
             contractNumber:         true,
@@ -261,50 +292,55 @@ export class UserService {
      5. Dashboard (lightweight counts + recent)
         GET /users/:id/dashboard
   ─────────────────────────────────────────── */
-  async getUserDashboard(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id:          true,
-        name:        true,
-        designation: true,
-        email:       true,
+  async getUserDashboard(userId: string, requester: AuthUser) {
+    this.requireSelfOrAdmin(userId, requester);
+    const approvedContractWhere = this.getApprovedContractWhere(requester);
 
-        // ✅ Correct relation names from schema
-        _count: {
-          select: {
-            siteInchargeProjects: true, // projects they are site incharge of
-            managedContracts:     true, // contracts directly assigned to them
+    const [user, totalManagedContracts] = await this.prisma.$transaction([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id:          true,
+          name:        true,
+          designation: true,
+          email:       true,
+          _count: {
+            select: {
+              siteInchargeProjects: true,
+            },
+          },
+          siteInchargeProjects: {
+            take:    5,
+            orderBy: { updatedAt: 'desc' as const },
+            select: {
+              id:              true,
+              name:            true,
+              status:          true,
+              allocatedBudget: true,
+              fiscalYear:      true,
+            },
+          },
+          managedContracts: {
+            where: approvedContractWhere,
+            take:    5,
+            orderBy: { updatedAt: 'desc' as const },
+            select: {
+              id:             true,
+              contractNumber: true,
+              contractAmount: true,
+              status:         true,
+              project: { select: { id: true, name: true } },
+            },
           },
         },
-
-        // 5 most recent projects as site incharge
-        siteInchargeProjects: {
-          take:    5,
-          orderBy: { updatedAt: 'desc' as const },
-          select: {
-            id:              true,
-            name:            true,
-            status:          true,
-            allocatedBudget: true,
-            fiscalYear:      true,
-          },
+      }),
+      this.prisma.contract.count({
+        where: {
+          siteInchargeId: userId,
+          ...approvedContractWhere,
         },
-
-        // 5 most recent directly managed contracts
-        managedContracts: {
-          take:    5,
-          orderBy: { updatedAt: 'desc' as const },
-          select: {
-            id:             true,
-            contractNumber: true,
-            contractAmount: true,
-            status:         true,
-            project: { select: { id: true, name: true } },
-          },
-        },
-      },
-    });
+      }),
+    ]);
 
     if (!user) throw new NotFoundException('User not found');
 
@@ -317,7 +353,7 @@ export class UserService {
       },
       stats: {
         totalSiteInchargeProjects: user._count.siteInchargeProjects,
-        totalManagedContracts:     user._count.managedContracts,
+        totalManagedContracts,
       },
       recentProjects:  user.siteInchargeProjects.map((p) => ({
         ...p,
@@ -333,8 +369,9 @@ export class UserService {
   /* ───────────────────────────────────────────
      6. Update User
   ─────────────────────────────────────────── */
-  async update(id: string, updateUserDto: UpdateUserDto) {
-    await this.findOne(id);
+  async update(id: string, updateUserDto: UpdateUserDto, requester: AuthUser) {
+    requireAdminUser(requester);
+    await this.findOne(id, requester);
 
     if (updateUserDto.password) {
       updateUserDto.password = await bcrypt.hash(updateUserDto.password, 10);
@@ -349,8 +386,9 @@ export class UserService {
   /* ───────────────────────────────────────────
      7. Delete User
   ─────────────────────────────────────────── */
-  async remove(id: string) {
-    await this.findOne(id);
+  async remove(id: string, requester: AuthUser) {
+    requireAdminUser(requester);
+    await this.findOne(id, requester);
     return this.prisma.user.delete({ where: { id } });
   }
 

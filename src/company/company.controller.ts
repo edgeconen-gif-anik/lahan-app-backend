@@ -8,6 +8,8 @@ import {
   Delete, 
   Query, 
   ParseUUIDPipe, 
+  Request,
+  UseGuards,
   UsePipes // Remove ValidationPipe import
 } from '@nestjs/common';
 import { CompanyService } from './company.service';
@@ -15,9 +17,11 @@ import { CreateCompanyDto, UpdateCompanyDto } from './dto/company.dto';
 import { CompanyCategory } from '@prisma/client';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { ZodValidationPipe } from 'nestjs-zod'; // <--- IMPORT THIS
+import { JwtAuthGuard } from '../auth/guard/jwt-auth.guard';
 
 @ApiTags('Companies')
 @Controller('companies')
+@UseGuards(JwtAuthGuard)
 export class CompanyController {
   constructor(private readonly companyService: CompanyService) {}
 
@@ -31,8 +35,8 @@ export class CompanyController {
   
   // FIX: Use ZodValidationPipe instead of ValidationPipe
   @UsePipes(ZodValidationPipe) 
-  create(@Body() createCompanyDto: CreateCompanyDto) {
-    return this.companyService.create(createCompanyDto);
+  create(@Body() createCompanyDto: CreateCompanyDto, @Request() req) {
+    return this.companyService.create(createCompanyDto, req.user);
   }
 
   // ==========================
@@ -47,8 +51,9 @@ export class CompanyController {
   findAll(
     @Query('search') search?: string,
     @Query('category') category?: CompanyCategory,
+    @Request() req?,
   ) {
-    return this.companyService.findAll({ search, category });
+    return this.companyService.findAll({ search, category }, req.user);
   }
 
   // ==========================
@@ -57,8 +62,14 @@ export class CompanyController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a specific company by ID' })
   @ApiResponse({ status: 404, description: 'Company not found' })
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.companyService.findOne(id);
+  findOne(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.companyService.findOne(id, req.user);
+  }
+
+  @Patch(':id/approve')
+  @ApiOperation({ summary: 'Approve a company registration' })
+  approve(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.companyService.approve(id, req.user);
   }
 
   // ==========================
@@ -73,9 +84,10 @@ export class CompanyController {
   @UsePipes(ZodValidationPipe)
   update(
     @Param('id', ParseUUIDPipe) id: string, 
-    @Body() updateCompanyDto: UpdateCompanyDto
+    @Body() updateCompanyDto: UpdateCompanyDto,
+    @Request() req,
   ) {
-    return this.companyService.update(id, updateCompanyDto);
+    return this.companyService.update(id, updateCompanyDto, req.user);
   }
 
   // ==========================
@@ -84,7 +96,7 @@ export class CompanyController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a company' })
   @ApiResponse({ status: 200, description: 'Company deleted successfully.' })
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.companyService.remove(id);
+  remove(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.companyService.remove(id, req.user);
   }
 }
