@@ -2,17 +2,19 @@
 // src/contract/contract.service.ts
 // ─────────────────────────────────────────────────────────────────────────────
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateContractDto, UpdateContractDto } from './dto/contract.dto';
-import { Prisma } from '@prisma/client';
+import { ApprovalStatus, Prisma } from '@prisma/client';
 import {
   AuthUser,
   getApprovalStateForSave,
   getApprovalVisibilityWhere,
+  isAdminUser,
   requireAdminUser,
 } from '../auth/auth-user';
 
@@ -82,6 +84,31 @@ function getCurrentFiscalYearAdDates(): {
 @Injectable()
 export class ContractService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private getApprovalPatchForUpdate(
+    existingContract: {
+      approvalStatus: ApprovalStatus;
+      approvedAt: Date | null;
+    },
+    user: AuthUser,
+    preserveApproval: boolean,
+  ) {
+    if (
+      preserveApproval ||
+      (isAdminUser(user) &&
+        existingContract.approvalStatus === ApprovalStatus.APPROVED)
+    ) {
+      return {
+        approvalStatus: existingContract.approvalStatus,
+        approvedAt:
+          existingContract.approvalStatus === ApprovalStatus.APPROVED
+            ? existingContract.approvedAt ?? new Date()
+            : existingContract.approvedAt,
+      };
+    }
+
+    return getApprovalStateForSave(user);
+  }
 
   // ── Generate next sequential contract number ──────────────────────────────
   // Called by GET /contracts/next-number before the form is submitted.
@@ -181,15 +208,41 @@ export class ContractService {
   }
 
   async update(id: string, dto: UpdateContractDto, user: AuthUser) {
-    await this.findOne(id, user);
+    const existingContract = await this.prisma.contract.findFirst({
+      where: { id, ...getApprovalVisibilityWhere(user) },
+      select: {
+        id: true,
+        approvalStatus: true,
+        approvedAt: true,
+      },
+    });
+
+    if (!existingContract) {
+      throw new NotFoundException(`Contract ${id} not found`);
+    }
 
     const { agreement, workOrder, contractAmount, ...rest } = dto;
+    const isStatusUpdate = dto.status !== undefined;
+
+    if (isStatusUpdate) {
+      requireAdminUser(user, 'Only admins can change contract milestone status');
+
+      if (existingContract.approvalStatus !== ApprovalStatus.APPROVED) {
+        throw new BadRequestException(
+          'Only approved contracts can change milestone status',
+        );
+      }
+    }
 
     return this.prisma.contract.update({
       where: { id },
       data: {
         ...rest,
-        ...getApprovalStateForSave(user),
+        ...this.getApprovalPatchForUpdate(
+          existingContract,
+          user,
+          isStatusUpdate,
+        ),
         contractAmount: contractAmount != null
           ? new Prisma.Decimal(contractAmount)
           : undefined,

@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { ContractStatus } from '@prisma/client';
 
 const AgreementSchema = z.object({
   agreementDate:       z.coerce.date(),
@@ -27,6 +28,7 @@ const CreateContractSchema = z
     siteInchargeId:  z.string().uuid().optional(), // ✅ NEW: site incharge on the contract
     contractNumber:  z.string().min(1),
     contractAmount:  z.number().positive(),
+    status:          z.nativeEnum(ContractStatus).optional(),
 
     startDate:              z.coerce.date(),
     intendedCompletionDate: z.coerce.date(),
@@ -76,6 +78,7 @@ const UpdateContractSchema = z
     siteInchargeId:  z.string().uuid().optional(), // ✅ NEW: site incharge on the contract
     contractNumber:  z.string().min(1).optional(),
     contractAmount:  z.number().positive().optional(),
+    status:          z.nativeEnum(ContractStatus).optional(),
 
     startDate:              z.coerce.date().optional(),
     intendedCompletionDate: z.coerce.date().optional(),
