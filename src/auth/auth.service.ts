@@ -152,7 +152,7 @@ export class AuthService {
       },
     });
 
-    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://lahan-app-frontend.onrender.com').replace(
       /\/$/,
       '',
     );
