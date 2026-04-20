@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateContractDto, UpdateContractDto } from './dto/contract.dto';
-import { ApprovalStatus, Prisma } from '@prisma/client';
+import { ApprovalStatus, ContractStatus, Prisma } from '@prisma/client';
 import {
   AuthUser,
   getApprovalStateForSave,
@@ -17,6 +17,14 @@ import {
   isAdminUser,
   requireAdminUser,
 } from '../auth/auth-user';
+
+const MILESTONE_ORDER: ContractStatus[] = [
+  ContractStatus.NOT_STARTED,
+  ContractStatus.AGREEMENT,
+  ContractStatus.WORKORDER,
+  ContractStatus.WORKINPROGRESS,
+  ContractStatus.COMPLETED,
+];
 
 const CONTRACT_INCLUDE = {
   project: {
@@ -85,6 +93,65 @@ function getCurrentFiscalYearAdDates(): {
 export class ContractService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private validateMilestoneChange(input: {
+    currentStatus: ContractStatus;
+    nextStatus: ContractStatus;
+    hasAgreement: boolean;
+    hasWorkOrder: boolean;
+    hasActualCompletionDate: boolean;
+  }) {
+    const {
+      currentStatus,
+      nextStatus,
+      hasAgreement,
+      hasWorkOrder,
+      hasActualCompletionDate,
+    } = input;
+
+    if (currentStatus === nextStatus) {
+      return;
+    }
+
+    if (currentStatus === ContractStatus.ARCHIVED) {
+      throw new BadRequestException(
+        'Archived contracts cannot move to another milestone',
+      );
+    }
+
+    if (nextStatus === ContractStatus.ARCHIVED) {
+      return;
+    }
+
+    const currentIndex = MILESTONE_ORDER.indexOf(currentStatus);
+    const nextIndex = MILESTONE_ORDER.indexOf(nextStatus);
+
+    if (currentIndex === -1 || nextIndex === -1) {
+      throw new BadRequestException('Unsupported contract milestone status');
+    }
+
+    if (nextIndex < currentIndex) {
+      throw new BadRequestException('Contract milestone cannot move backwards');
+    }
+
+    if (nextIndex >= MILESTONE_ORDER.indexOf(ContractStatus.AGREEMENT) && !hasAgreement) {
+      throw new BadRequestException(
+        'Agreement details are required for AGREEMENT milestone or later',
+      );
+    }
+
+    if (nextIndex >= MILESTONE_ORDER.indexOf(ContractStatus.WORKORDER) && !hasWorkOrder) {
+      throw new BadRequestException(
+        'Work order details are required for WORKORDER milestone or later',
+      );
+    }
+
+    if (nextStatus === ContractStatus.COMPLETED && !hasActualCompletionDate) {
+      throw new BadRequestException(
+        'actualCompletionDate is required when marking a contract as COMPLETED',
+      );
+    }
+  }
+
   private getApprovalPatchForUpdate(
     existingContract: {
       approvalStatus: ApprovalStatus;
@@ -137,6 +204,18 @@ export class ContractService {
 
   async create(dto: CreateContractDto, user: AuthUser) {
     const { agreement, workOrder, contractAmount, ...rest } = dto;
+    const nextStatus = dto.status ?? ContractStatus.NOT_STARTED;
+
+    if (nextStatus !== ContractStatus.NOT_STARTED) {
+      requireAdminUser(user, 'Only admins can set an initial contract milestone');
+      this.validateMilestoneChange({
+        currentStatus: ContractStatus.NOT_STARTED,
+        nextStatus,
+        hasAgreement: agreement != null,
+        hasWorkOrder: workOrder != null,
+        hasActualCompletionDate: dto.actualCompletionDate != null,
+      });
+    }
 
     try {
       return await this.prisma.contract.create({
@@ -212,8 +291,16 @@ export class ContractService {
       where: { id, ...getApprovalVisibilityWhere(user) },
       select: {
         id: true,
+        status: true,
+        actualCompletionDate: true,
         approvalStatus: true,
         approvedAt: true,
+        agreement: {
+          select: { id: true },
+        },
+        workOrder: {
+          select: { id: true },
+        },
       },
     });
 
@@ -223,8 +310,9 @@ export class ContractService {
 
     const { agreement, workOrder, contractAmount, ...rest } = dto;
     const isStatusUpdate = dto.status !== undefined;
+    const nextStatus = dto.status;
 
-    if (isStatusUpdate) {
+    if (isStatusUpdate && nextStatus) {
       requireAdminUser(user, 'Only admins can change contract milestone status');
 
       if (existingContract.approvalStatus !== ApprovalStatus.APPROVED) {
@@ -232,6 +320,16 @@ export class ContractService {
           'Only approved contracts can change milestone status',
         );
       }
+
+      this.validateMilestoneChange({
+        currentStatus: existingContract.status,
+        nextStatus,
+        hasAgreement: existingContract.agreement != null || agreement != null,
+        hasWorkOrder: existingContract.workOrder != null || workOrder != null,
+        hasActualCompletionDate:
+          existingContract.actualCompletionDate != null ||
+          dto.actualCompletionDate != null,
+      });
     }
 
     return this.prisma.contract.update({

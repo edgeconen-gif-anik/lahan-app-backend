@@ -6,6 +6,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtStrategy } from './strategy/jwt.strategy';
+import { AUTH_ACCESS_TOKEN_MAX_AGE } from './session-config';
 
 @Module({
   imports: [
@@ -16,7 +17,7 @@ import { JwtStrategy } from './strategy/jwt.strategy';
         process.env.JWT_SECRET ||
         process.env.JWT_SECRET_KEY ||
         'secretKey', // Use a .env var in production!
-      signOptions: { expiresIn: '1d' },
+      signOptions: { expiresIn: AUTH_ACCESS_TOKEN_MAX_AGE },
     }),
   ],
   providers: [AuthService, PrismaService, JwtStrategy],

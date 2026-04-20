@@ -9,7 +9,6 @@ import { Prisma } from '@prisma/client';
 import {
   AuthUser,
   getApprovalStateForSave,
-  getApprovalVisibilityWhere,
   requireAdminUser,
 } from '../auth/auth-user';
 
@@ -54,12 +53,10 @@ export class CompanyService {
 
   async findAll(
     params: { search?: string; category?: any },
-    user: AuthUser,
+    _user: AuthUser,
   ) {
     const { search, category } = params;
-    const where: Prisma.CompanyWhereInput = {
-      ...getApprovalVisibilityWhere(user),
-    };
+    const where: Prisma.CompanyWhereInput = {};
 
     if (search) {
       const isNumber = !isNaN(Number(search));
@@ -77,9 +74,9 @@ export class CompanyService {
     });
   }
 
-  async findOne(id: string, user: AuthUser) {
+  async findOne(id: string, _user: AuthUser) {
     const company = await this.prisma.company.findFirst({
-      where: { id, ...getApprovalVisibilityWhere(user) },
+      where: { id },
       include: { projects: true },
     });
     if (!company) throw new NotFoundException(`Company ${id} not found`);

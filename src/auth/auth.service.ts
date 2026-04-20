@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { getIdleSessionExpiry } from './session-config';
 
 interface GoogleUserDto {
   email: string;
@@ -58,9 +59,18 @@ export class AuthService {
   }
 
   async login(user: any) {
+    const session = await this.prisma.session.create({
+      data: {
+        sessionToken: randomBytes(32).toString('hex'),
+        userId: user.id,
+        expires: getIdleSessionExpiry(),
+      },
+    });
+
     const payload = {
       email: user.email,
       sub: user.id,
+      sid: session.sessionToken,
       role: user.role,
       designation: user.designation,
     };

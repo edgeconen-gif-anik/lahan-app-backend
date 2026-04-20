@@ -4,6 +4,7 @@ import { ApprovalStatus, Role } from '@prisma/client';
 export type AuthUser = {
   id: string;
   email: string;
+  sessionToken?: string;
   role?: Role | null;
   designation?: string | null;
 };
