@@ -241,4 +241,83 @@ describe('ContractService', () => {
 
     expect(prisma.contract.update).not.toHaveBeenCalled();
   });
+
+  it('lets the assigned site incharge submit a project update that completes the contract', async () => {
+    const approvedAt = new Date('2026-03-01T10:00:00.000Z');
+    const actualCompletionDate = new Date('2026-04-20T00:00:00.000Z');
+    prisma.contract.count.mockResolvedValue(0);
+
+    prisma.contract.findFirst.mockResolvedValue({
+      id: 'contract-1',
+      projectId: 'project-1',
+      startDate: new Date('2026-04-01T00:00:00.000Z'),
+      status: ContractStatus.WORKINPROGRESS,
+      approvalStatus: ApprovalStatus.APPROVED,
+      approvedAt,
+      siteInchargeId: 'user-1',
+      userID: null,
+    });
+    prisma.contract.update.mockResolvedValue({
+      id: 'contract-1',
+      status: ContractStatus.COMPLETED,
+      projectId: 'project-1',
+      completionCode: 'CCR-2082-83-0001',
+    });
+
+    await service.applyProjectUpdate(
+      'contract-1',
+      {
+        finalEvaluatedAmount: 455000,
+        actualCompletionDate,
+      } as any,
+      {
+        id: 'user-1',
+        email: 'user@example.com',
+        role: Role.CREATOR,
+      },
+    );
+
+    expect(prisma.contract.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'contract-1' },
+        data: expect.objectContaining({
+          status: ContractStatus.COMPLETED,
+          actualCompletionDate,
+          completionCode: 'CCR-2082-83-0001',
+          approvalStatus: ApprovalStatus.APPROVED,
+          approvedAt,
+        }),
+      }),
+    );
+  });
+
+  it('rejects project updates from users who are not assigned to the contract', async () => {
+    prisma.contract.findFirst.mockResolvedValue({
+      id: 'contract-1',
+      projectId: 'project-1',
+      startDate: new Date('2026-04-01T00:00:00.000Z'),
+      status: ContractStatus.WORKINPROGRESS,
+      approvalStatus: ApprovalStatus.APPROVED,
+      approvedAt: new Date('2026-03-01T10:00:00.000Z'),
+      siteInchargeId: 'user-2',
+      userID: null,
+    });
+
+    await expect(
+      service.applyProjectUpdate(
+        'contract-1',
+        {
+          finalEvaluatedAmount: 455000,
+          actualCompletionDate: new Date('2026-04-20T00:00:00.000Z'),
+        } as any,
+        {
+          id: 'user-1',
+          email: 'user@example.com',
+          role: Role.CREATOR,
+        },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.contract.update).not.toHaveBeenCalled();
+  });
 });

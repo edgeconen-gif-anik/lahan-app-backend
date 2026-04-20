@@ -16,7 +16,11 @@ import {
 } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { ContractService } from './contract.service';
-import { CreateContractDto, UpdateContractDto } from './dto/contract.dto';
+import {
+  CreateContractDto,
+  ProjectUpdateDto,
+  UpdateContractDto,
+} from './dto/contract.dto';
 import { JwtAuthGuard } from '../auth/guard/jwt-auth.guard';
 
 @Controller('contracts')
@@ -65,6 +69,15 @@ export class ContractController {
   @Patch(':id/approve')
   approve(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.approve(id, req.user);
+  }
+
+  @Patch(':id/project-update')
+  projectUpdate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() projectUpdateDto: ProjectUpdateDto,
+    @Request() req,
+  ) {
+    return this.contractService.applyProjectUpdate(id, projectUpdateDto, req.user);
   }
 
   @Patch(':id')

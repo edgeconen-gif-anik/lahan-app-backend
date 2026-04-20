@@ -162,7 +162,9 @@ model Contract {
   userID                 String?        // committee representative user
   siteInchargeId         String?        // ✅ NEW: site incharge for this contract
   contractNumber         String         @unique
+  completionCode         String?        @unique
   contractAmount         Decimal
+  finalEvaluatedAmount   Decimal?
   startDate              DateTime
   intendedCompletionDate DateTime
   actualCompletionDate   DateTime?

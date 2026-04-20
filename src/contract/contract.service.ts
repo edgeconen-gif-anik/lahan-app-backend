@@ -3,12 +3,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateContractDto, UpdateContractDto } from './dto/contract.dto';
+import {
+  CreateContractDto,
+  ProjectUpdateDto,
+  UpdateContractDto,
+} from './dto/contract.dto';
 import { ApprovalStatus, ContractStatus, Prisma } from '@prisma/client';
 import {
   AuthUser,
@@ -60,12 +65,15 @@ const CONTRACT_INCLUDE = {
 // The backend counts existing contracts whose contractNumber starts with the
 // current FY prefix, so the count is always accurate regardless of gaps or
 // manual overrides (which use a completely different format).
-function getCurrentFiscalYearAdDates(): {
+function getFiscalYearSequenceWindow(
+  prefixLabel: string,
+  referenceDate: Date = new Date(),
+): {
   start: Date;
   end: Date;
   prefix: string;
 } {
-  const now   = new Date();
+  const now   = referenceDate;
   const month = now.getMonth() + 1;
   const year  = now.getFullYear();
 
@@ -84,7 +92,7 @@ function getCurrentFiscalYearAdDates(): {
   const bsEndTwoDigit = String(bsStartYear + 1).slice(-2);
 
   // ❹ PREFIX FORMAT → "CNT-2081-82-"
-  const prefix = `CNT-${bsStartYear}-${bsEndTwoDigit}-`;
+  const prefix = `${prefixLabel}-${bsStartYear}-${bsEndTwoDigit}-`;
 
   return { start, end, prefix };
 }
@@ -99,6 +107,7 @@ export class ContractService {
     hasAgreement: boolean;
     hasWorkOrder: boolean;
     hasActualCompletionDate: boolean;
+    hasFinalEvaluatedAmount: boolean;
   }) {
     const {
       currentStatus,
@@ -106,6 +115,7 @@ export class ContractService {
       hasAgreement,
       hasWorkOrder,
       hasActualCompletionDate,
+      hasFinalEvaluatedAmount,
     } = input;
 
     if (currentStatus === nextStatus) {
@@ -150,6 +160,63 @@ export class ContractService {
         'actualCompletionDate is required when marking a contract as COMPLETED',
       );
     }
+
+    if (nextStatus === ContractStatus.COMPLETED && !hasFinalEvaluatedAmount) {
+      throw new BadRequestException(
+        'finalEvaluatedAmount is required when marking a contract as COMPLETED',
+      );
+    }
+  }
+
+  private ensureProjectUpdateAccess(
+    contract: {
+      siteInchargeId: string | null;
+      userID: string | null;
+    },
+    user: AuthUser,
+  ) {
+    if (isAdminUser(user)) {
+      return;
+    }
+
+    if (contract.siteInchargeId === user.id || contract.userID === user.id) {
+      return;
+    }
+
+    throw new ForbiddenException(
+      'Only the assigned site incharge or an admin can submit a project update',
+    );
+  }
+
+  private getFinalEvaluatedAmountPatch(value?: number) {
+    if (value == null) {
+      return undefined;
+    }
+
+    return new Prisma.Decimal(value);
+  }
+
+  private isUniqueConstraintErrorForField(error: unknown, field: string) {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== 'P2002'
+    ) {
+      return false;
+    }
+
+    const target = error.meta?.target;
+    return Array.isArray(target) && target.includes(field);
+  }
+
+  private async getNextCompletionCode(referenceDate: Date) {
+    const { prefix } = getFiscalYearSequenceWindow('CCR', referenceDate);
+    const count = await this.prisma.contract.count({
+      where: {
+        completionCode: { startsWith: prefix },
+      },
+    });
+
+    return `${prefix}${String(count + 1).padStart(4, '0')}`;
   }
 
   private getApprovalPatchForUpdate(
@@ -188,7 +255,7 @@ export class ContractService {
     contractNumber: string;
     sequence: number;
   }> {
-    const { start, end, prefix } = getCurrentFiscalYearAdDates();
+    const { start, end, prefix } = getFiscalYearSequenceWindow('CNT');
 
     const count = await this.prisma.contract.count({
       where: {
@@ -203,8 +270,16 @@ export class ContractService {
   }
 
   async create(dto: CreateContractDto, user: AuthUser) {
-    const { agreement, workOrder, contractAmount, ...rest } = dto;
+    const { agreement, workOrder, contractAmount, finalEvaluatedAmount, ...rest } = dto;
     const nextStatus = dto.status ?? ContractStatus.NOT_STARTED;
+    const actualCompletionDate =
+      nextStatus === ContractStatus.COMPLETED
+        ? dto.actualCompletionDate ?? new Date()
+        : dto.actualCompletionDate;
+    const completionCode =
+      nextStatus === ContractStatus.COMPLETED
+        ? await this.getNextCompletionCode(actualCompletionDate ?? new Date())
+        : undefined;
 
     if (nextStatus !== ContractStatus.NOT_STARTED) {
       requireAdminUser(user, 'Only admins can set an initial contract milestone');
@@ -213,7 +288,8 @@ export class ContractService {
         nextStatus,
         hasAgreement: agreement != null,
         hasWorkOrder: workOrder != null,
-        hasActualCompletionDate: dto.actualCompletionDate != null,
+        hasActualCompletionDate: actualCompletionDate != null,
+        hasFinalEvaluatedAmount: dto.finalEvaluatedAmount != null,
       });
     }
 
@@ -222,7 +298,12 @@ export class ContractService {
         data: {
           ...rest,
           ...getApprovalStateForSave(user),
+          actualCompletionDate,
+          completionCode,
           contractAmount: new Prisma.Decimal(contractAmount),
+          finalEvaluatedAmount: this.getFinalEvaluatedAmountPatch(
+            finalEvaluatedAmount,
+          ),
           agreement: agreement
             ? {
                 create: {
@@ -240,7 +321,15 @@ export class ContractService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        throw new ConflictException('Contract number already exists');
+        if (this.isUniqueConstraintErrorForField(error, 'contractNumber')) {
+          throw new ConflictException('Contract number already exists');
+        }
+
+        if (this.isUniqueConstraintErrorForField(error, 'completionCode')) {
+          throw new ConflictException(
+            'Could not generate a unique completion code. Please retry.',
+          );
+        }
       }
       throw error;
     }
@@ -291,8 +380,14 @@ export class ContractService {
       where: { id, ...getApprovalVisibilityWhere(user) },
       select: {
         id: true,
+        projectId: true,
         status: true,
+        startDate: true,
+        siteInchargeId: true,
+        userID: true,
+        completionCode: true,
         actualCompletionDate: true,
+        finalEvaluatedAmount: true,
         approvalStatus: true,
         approvedAt: true,
         agreement: {
@@ -308,9 +403,18 @@ export class ContractService {
       throw new NotFoundException(`Contract ${id} not found`);
     }
 
-    const { agreement, workOrder, contractAmount, ...rest } = dto;
+    const { agreement, workOrder, contractAmount, finalEvaluatedAmount, ...rest } = dto;
     const isStatusUpdate = dto.status !== undefined;
     const nextStatus = dto.status;
+    const resolvedActualCompletionDate =
+      nextStatus === ContractStatus.COMPLETED
+        ? dto.actualCompletionDate ??
+          existingContract.actualCompletionDate ??
+          new Date()
+        : dto.actualCompletionDate;
+    const shouldGenerateCompletionCode =
+      nextStatus === ContractStatus.COMPLETED &&
+      existingContract.completionCode == null;
 
     if (isStatusUpdate && nextStatus) {
       requireAdminUser(user, 'Only admins can change contract milestone status');
@@ -326,57 +430,162 @@ export class ContractService {
         nextStatus,
         hasAgreement: existingContract.agreement != null || agreement != null,
         hasWorkOrder: existingContract.workOrder != null || workOrder != null,
-        hasActualCompletionDate:
-          existingContract.actualCompletionDate != null ||
-          dto.actualCompletionDate != null,
+        hasActualCompletionDate: resolvedActualCompletionDate != null,
+        hasFinalEvaluatedAmount:
+          existingContract.finalEvaluatedAmount != null ||
+          dto.finalEvaluatedAmount != null,
       });
     }
 
-    return this.prisma.contract.update({
-      where: { id },
-      data: {
-        ...rest,
-        ...this.getApprovalPatchForUpdate(
-          existingContract,
-          user,
-          isStatusUpdate,
-        ),
-        contractAmount: contractAmount != null
-          ? new Prisma.Decimal(contractAmount)
-          : undefined,
-        agreement: agreement
-          ? {
-              upsert: {
-                create: {
-                  ...agreement,
-                  content:       agreement.content       ?? '',
-                  agreementDate: agreement.agreementDate ?? new Date(),
-                  amount:        new Prisma.Decimal(agreement.amount ?? 0),
-                },
-                update: {
-                  ...agreement,
-                  amount: agreement.amount != null
-                    ? new Prisma.Decimal(agreement.amount)
-                    : undefined,
-                },
-              },
-            }
-          : undefined,
-        workOrder: workOrder
-          ? {
-              upsert: {
-                create: {
-                  ...workOrder,
-                  content:            workOrder.content            ?? '',
-                  workCompletionDate: workOrder.workCompletionDate ?? new Date(),
-                },
-                update: workOrder,
-              },
-            }
-          : undefined,
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const completionCode = shouldGenerateCompletionCode
+          ? await this.getNextCompletionCode(
+              resolvedActualCompletionDate ?? new Date(),
+            )
+          : undefined;
+
+        return await this.prisma.contract.update({
+          where: { id },
+          data: {
+            ...rest,
+            ...this.getApprovalPatchForUpdate(
+              existingContract,
+              user,
+              isStatusUpdate,
+            ),
+            actualCompletionDate: resolvedActualCompletionDate,
+            completionCode,
+            contractAmount: contractAmount != null
+              ? new Prisma.Decimal(contractAmount)
+              : undefined,
+            finalEvaluatedAmount: this.getFinalEvaluatedAmountPatch(
+              finalEvaluatedAmount,
+            ),
+            agreement: agreement
+              ? {
+                  upsert: {
+                    create: {
+                      ...agreement,
+                      content:       agreement.content       ?? '',
+                      agreementDate: agreement.agreementDate ?? new Date(),
+                      amount:        new Prisma.Decimal(agreement.amount ?? 0),
+                    },
+                    update: {
+                      ...agreement,
+                      amount: agreement.amount != null
+                        ? new Prisma.Decimal(agreement.amount)
+                        : undefined,
+                    },
+                  },
+                }
+              : undefined,
+            workOrder: workOrder
+              ? {
+                  upsert: {
+                    create: {
+                      ...workOrder,
+                      content:            workOrder.content            ?? '',
+                      workCompletionDate: workOrder.workCompletionDate ?? new Date(),
+                    },
+                    update: workOrder,
+                  },
+                }
+              : undefined,
+          },
+          include: CONTRACT_INCLUDE,
+        });
+      } catch (error) {
+        if (
+          shouldGenerateCompletionCode &&
+          this.isUniqueConstraintErrorForField(error, 'completionCode') &&
+          attempt < 2
+        ) {
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    throw new ConflictException(
+      'Could not generate a unique completion code. Please retry.',
+    );
+  }
+
+  async applyProjectUpdate(id: string, dto: ProjectUpdateDto, user: AuthUser) {
+    const existingContract = await this.prisma.contract.findFirst({
+      where: { id, ...getApprovalVisibilityWhere(user) },
+      select: {
+        id: true,
+        projectId: true,
+        startDate: true,
+        status: true,
+        approvalStatus: true,
+        approvedAt: true,
+        siteInchargeId: true,
+        userID: true,
+        completionCode: true,
       },
-      include: CONTRACT_INCLUDE,
     });
+
+    if (!existingContract) {
+      throw new NotFoundException(`Contract ${id} not found`);
+    }
+
+    if (existingContract.status === ContractStatus.ARCHIVED) {
+      throw new BadRequestException('Archived contracts cannot be updated');
+    }
+
+    this.ensureProjectUpdateAccess(existingContract, user);
+
+    const actualCompletionDate = dto.actualCompletionDate ?? new Date();
+
+    if (actualCompletionDate <= existingContract.startDate) {
+      throw new BadRequestException(
+        'actualCompletionDate must be after the contract startDate',
+      );
+    }
+
+    const shouldGenerateCompletionCode = existingContract.completionCode == null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const completionCode = shouldGenerateCompletionCode
+          ? await this.getNextCompletionCode(actualCompletionDate)
+          : undefined;
+
+        return await this.prisma.contract.update({
+          where: { id },
+          data: {
+            finalEvaluatedAmount: new Prisma.Decimal(dto.finalEvaluatedAmount),
+            actualCompletionDate,
+            completionCode,
+            status: ContractStatus.COMPLETED,
+            approvalStatus: existingContract.approvalStatus,
+            approvedAt:
+              existingContract.approvalStatus === ApprovalStatus.APPROVED
+                ? existingContract.approvedAt ?? new Date()
+                : existingContract.approvedAt,
+          },
+          include: CONTRACT_INCLUDE,
+        });
+      } catch (error) {
+        if (
+          shouldGenerateCompletionCode &&
+          this.isUniqueConstraintErrorForField(error, 'completionCode') &&
+          attempt < 2
+        ) {
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    throw new ConflictException(
+      'Could not generate a unique completion code. Please retry.',
+    );
   }
 
   async approve(id: string, user: AuthUser) {

@@ -19,6 +19,11 @@ const WorkOrderSchema = z.object({
   witnessName:         z.string().optional(),
 });
 
+const ProjectUpdateSchema = z.object({
+  finalEvaluatedAmount: z.number().positive(),
+  actualCompletionDate: z.coerce.date().optional(),
+});
+
 const CreateContractSchema = z
   .object({
     projectId:       z.string().uuid(),
@@ -28,6 +33,7 @@ const CreateContractSchema = z
     siteInchargeId:  z.string().uuid().optional(), // ✅ NEW: site incharge on the contract
     contractNumber:  z.string().min(1),
     contractAmount:  z.number().positive(),
+    finalEvaluatedAmount: z.number().positive().optional(),
     status:          z.nativeEnum(ContractStatus).optional(),
 
     startDate:              z.coerce.date(),
@@ -78,6 +84,7 @@ const UpdateContractSchema = z
     siteInchargeId:  z.string().uuid().optional(), // ✅ NEW: site incharge on the contract
     contractNumber:  z.string().min(1).optional(),
     contractAmount:  z.number().positive().optional(),
+    finalEvaluatedAmount: z.number().positive().optional(),
     status:          z.nativeEnum(ContractStatus).optional(),
 
     startDate:              z.coerce.date().optional(),
@@ -115,3 +122,4 @@ const UpdateContractSchema = z
 
 export class CreateContractDto extends createZodDto(CreateContractSchema) {}
 export class UpdateContractDto extends createZodDto(UpdateContractSchema) {}
+export class ProjectUpdateDto extends createZodDto(ProjectUpdateSchema) {}
