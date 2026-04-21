@@ -12,7 +12,9 @@ const CommitteeRoleEnum = z.enum([
 // Sub-schema for officials
 const OfficialSchema = z.object({
   name: z.string().min(2, 'Name is required'),
-  phoneNumber: z.string().min(10, 'Valid phone number required'),
+  phoneNumber: z
+    .string()
+    .regex(/^\d{10}$/, 'Phone number must be exactly 10 digits'),
   citizenshipNumber: z
     .string()
     .min(3, 'Citizenship number required')

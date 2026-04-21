@@ -21,9 +21,17 @@ export const CompanySchema = z.object({
   
   contactPerson: z.string().optional(),
   
-  phoneNumber: z.string().optional(),
+  phoneNumber: z
+    .union([
+      z.literal(''),
+      z.string().regex(/^\d{10}$/, 'Mobile number must be exactly 10 digits'),
+    ])
+    .optional(),
   
-  email: z.string().email().optional().describe('Official Email Address'),
+  email: z
+    .union([z.literal(''), z.string().email()])
+    .optional()
+    .describe('Official Email Address'),
 
   registrationDate: z.coerce.date().optional(),
   registrationRequestDate: z.coerce.date().optional(),
