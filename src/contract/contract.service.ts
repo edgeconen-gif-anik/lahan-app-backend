@@ -97,6 +97,55 @@ function getFiscalYearSequenceWindow(
   return { start, end, prefix };
 }
 
+function normalizeFiscalYearPrefix(input?: string | null): {
+  startYear: string;
+  endYearTwoDigit: string;
+} | null {
+  if (!input?.trim()) {
+    return null;
+  }
+
+  const match = input.trim().match(/^(\d{2,4})\s*[-/]\s*(\d{2,4})$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, startRaw, endRaw] = match;
+  let startYear: string;
+
+  if (startRaw.length === 4) {
+    startYear = startRaw;
+  } else if (startRaw.length === 3) {
+    startYear = `2${startRaw}`;
+  } else {
+    startYear = `20${startRaw}`;
+  }
+
+  const endYearTwoDigit = endRaw.slice(-2);
+
+  if (!/^\d{4}$/.test(startYear) || !/^\d{2}$/.test(endYearTwoDigit)) {
+    return null;
+  }
+
+  return {
+    startYear,
+    endYearTwoDigit,
+  };
+}
+
+function buildSequencePrefix(
+  prefixLabel: string,
+  fiscalYear?: string | null,
+  referenceDate: Date = new Date(),
+) {
+  const normalizedFiscalYear = normalizeFiscalYearPrefix(fiscalYear);
+  if (normalizedFiscalYear) {
+    return `${prefixLabel}-${normalizedFiscalYear.startYear}-${normalizedFiscalYear.endYearTwoDigit}-`;
+  }
+
+  return getFiscalYearSequenceWindow(prefixLabel, referenceDate).prefix;
+}
+
 @Injectable()
 export class ContractService {
   constructor(private readonly prisma: PrismaService) {}
@@ -251,15 +300,29 @@ export class ContractService {
   // Race-condition note: this is a *suggestion*, not a reservation.
   // If two users submit simultaneously the second will get a P2002
   // ConflictException — the frontend should re-fetch and retry.
-  async getNextContractNumber(): Promise<{
+  async getNextContractNumber(projectId?: string): Promise<{
     contractNumber: string;
     sequence: number;
   }> {
-    const { start, end, prefix } = getFiscalYearSequenceWindow('CNT');
+    let fiscalYear: string | null | undefined;
+
+    if (projectId) {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { fiscalYear: true },
+      });
+
+      if (!project) {
+        throw new NotFoundException(`Project ${projectId} not found`);
+      }
+
+      fiscalYear = project.fiscalYear;
+    }
+
+    const prefix = buildSequencePrefix('CNT', fiscalYear);
 
     const count = await this.prisma.contract.count({
       where: {
-        createdAt:      { gte: start, lte: end },
         contractNumber: { startsWith: prefix },
       },
     });

@@ -30,8 +30,8 @@ export class ContractController {
   constructor(private readonly contractService: ContractService) {}
 
   @Get('next-number')
-  getNextContractNumber() {
-    return this.contractService.getNextContractNumber();
+  getNextContractNumber(@Query('projectId') projectId?: string) {
+    return this.contractService.getNextContractNumber(projectId);
   }
 
   @Post()

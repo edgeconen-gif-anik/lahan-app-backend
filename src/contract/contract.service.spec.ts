@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ApprovalStatus, ContractStatus, Role } from '@prisma/client';
 import { ContractService } from './contract.service';
 
@@ -12,6 +16,9 @@ describe('ContractService', () => {
       findFirst: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+    },
+    project: {
+      findUnique: jest.fn(),
     },
     agreement: {
       deleteMany: jest.fn(),
@@ -32,6 +39,38 @@ describe('ContractService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  it('uses the linked project fiscal year when suggesting the next contract number', async () => {
+    prisma.project.findUnique.mockResolvedValue({
+      fiscalYear: '82-83',
+    });
+    prisma.contract.count.mockResolvedValue(28);
+
+    await expect(service.getNextContractNumber('project-1')).resolves.toEqual({
+      contractNumber: 'CNT-2082-83-0029',
+      sequence: 29,
+    });
+
+    expect(prisma.project.findUnique).toHaveBeenCalledWith({
+      where: { id: 'project-1' },
+      select: { fiscalYear: true },
+    });
+    expect(prisma.contract.count).toHaveBeenCalledWith({
+      where: {
+        contractNumber: { startsWith: 'CNT-2082-83-' },
+      },
+    });
+  });
+
+  it('rejects next-number requests for missing projects', async () => {
+    prisma.project.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.getNextContractNumber('missing-project'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(prisma.contract.count).not.toHaveBeenCalled();
   });
 
   it('lets an admin change the milestone of an approved contract without resetting approval time', async () => {
