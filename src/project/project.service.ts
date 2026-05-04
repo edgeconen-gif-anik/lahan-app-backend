@@ -18,6 +18,10 @@ import { UpdateProjectSchema, UpdateProjectDto } from './dto/update-project.dto'
 import { QueryProjectSchema, QueryProjectDto } from './dto/query-project.dto';
 import { ImportProjectRowSchema } from './dto/import-project.dto';
 import { AuthUser, getApprovalVisibilityWhere, isAdminUser } from '../auth/auth-user';
+import {
+  getFiscalYearVariants,
+  normalizeFiscalYear,
+} from '../setup/fiscal-year';
 
 function mapProject(project: Project) {
   return {
@@ -141,24 +145,26 @@ export class ProjectService {
 
   async create(dto: CreateProjectDto) {
     const data = CreateProjectSchema.parse(dto);
+    const fiscalYear = normalizeFiscalYear(data.fiscalYear) ?? data.fiscalYear;
 
     const duplicate = await this.prisma.project.findFirst({
       where: {
         name: data.name,
         type: data.type,
         budgetCode: data.budgetCode,
-        fiscalYear: data.fiscalYear,
+        fiscalYear: { in: getFiscalYearVariants(fiscalYear) },
       },
     });
 
     if (duplicate) {
       throw new ConflictException(
-        `A project named "${data.name}" already exists for this Ward/Type and Budget Code in ${data.fiscalYear}.`,
+        `A project named "${data.name}" already exists for this Ward/Type and Budget Code in ${fiscalYear}.`,
       );
     }
 
     const payload: Prisma.ProjectUncheckedCreateInput = {
       ...data,
+      fiscalYear,
       implantedThrough: mapImplantedThrough(data.implantedThrough),
       allocatedBudget: safeDecimal(data.allocatedBudget),
       internalBudget: safeDecimal(data.internalBudget),
@@ -173,10 +179,11 @@ export class ProjectService {
   async findAll(query: QueryProjectDto, user: AuthUser) {
     const q = QueryProjectSchema.parse(query);
     const skip = (q.page - 1) * q.limit;
+    const fiscalYearVariants = getFiscalYearVariants(q.fiscalYear);
 
     const where: Prisma.ProjectWhereInput = {
       ...(q.status && { status: q.status }),
-      ...(q.fiscalYear && { fiscalYear: q.fiscalYear }),
+      ...(fiscalYearVariants.length && { fiscalYear: { in: fiscalYearVariants } }),
       ...(q.search && {
         OR: [
           { sNo: { contains: q.search, mode: 'insensitive' } },
@@ -195,7 +202,9 @@ export class ProjectService {
           SELECT * FROM "Project"
           WHERE 1=1
           ${q.status ? Prisma.sql`AND "status" = ${q.status}` : Prisma.sql``}
-          ${q.fiscalYear ? Prisma.sql`AND "fiscalYear" = ${q.fiscalYear}` : Prisma.sql``}
+          ${fiscalYearVariants.length
+            ? Prisma.sql`AND "fiscalYear" IN (${Prisma.join(fiscalYearVariants)})`
+            : Prisma.sql``}
           ${q.search
             ? Prisma.sql`AND (
                 "sNo" ILIKE ${'%' + q.search + '%'} OR
@@ -251,10 +260,15 @@ export class ProjectService {
 
   async update(id: string, dto: UpdateProjectDto) {
     const data = UpdateProjectSchema.parse(dto);
+    const fiscalYear =
+      data.fiscalYear == null
+        ? undefined
+        : normalizeFiscalYear(data.fiscalYear) ?? data.fiscalYear;
 
     try {
       const payload: Prisma.ProjectUncheckedUpdateInput = {
         ...data,
+        fiscalYear,
         implantedThrough: data.implantedThrough
           ? mapImplantedThrough(data.implantedThrough)
           : undefined,
@@ -313,20 +327,25 @@ export class ProjectService {
 
     const fiscalYearsInCsv = [
       ...new Set(
-        (parsed.data as any[]).map((r: any) => r.fiscalYear).filter(Boolean),
+        (parsed.data as any[])
+          .map((r: any) => normalizeFiscalYear(r.fiscalYear) ?? r.fiscalYear)
+          .filter(Boolean),
       ),
+    ];
+    const fiscalYearLookupValues = [
+      ...new Set(fiscalYearsInCsv.flatMap((year) => getFiscalYearVariants(year))),
     ];
 
     const existingProjects = await this.prisma.project.findMany({
       where: {
-        fiscalYear: { in: fiscalYearsInCsv as string[] },
+        fiscalYear: { in: fiscalYearLookupValues as string[] },
         sNo: { not: null },
       },
       select: { sNo: true, fiscalYear: true },
     });
 
     const existingSNoSet = new Set(
-      existingProjects.map((p) => `${p.fiscalYear}:${p.sNo}`),
+      existingProjects.map((p) => `${normalizeFiscalYear(p.fiscalYear) ?? p.fiscalYear}:${p.sNo}`),
     );
 
     (parsed.data as any[]).forEach((row: any, index: number) => {
@@ -339,8 +358,9 @@ export class ProjectService {
 
       const r = result.data;
       const sNoStr = r.sNo ? String(r.sNo).trim() : null;
+      const fiscalYear = normalizeFiscalYear(r.fiscalYear) ?? r.fiscalYear;
 
-      if (sNoStr && r.fiscalYear && existingSNoSet.has(`${r.fiscalYear}:${sNoStr}`)) {
+      if (sNoStr && fiscalYear && existingSNoSet.has(`${fiscalYear}:${sNoStr}`)) {
         skippedDuplicates++;
         return;
       }
@@ -350,7 +370,7 @@ export class ProjectService {
         name: r.name.trim(),
         type: r.type,
         budgetCode: r.budgetCode,
-        fiscalYear: r.fiscalYear,
+        fiscalYear,
         source: r.source,
         status: r.status ?? 'NOT_STARTED',
         implantedThrough: mapImplantedThrough(r.implantedThrough) ?? undefined,

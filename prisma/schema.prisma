@@ -224,6 +224,17 @@ model WorkOrder {
   contract            Contract @relation(fields: [contractId], references: [id])
 }
 
+model SystemSetting {
+  id                             String   @id @default("default")
+  currentFiscalYear              String
+  chiefAdministrativeOfficerName String?
+  sectionChiefName               String?
+  createdAt                      DateTime @default(now())
+  updatedAt                      DateTime @updatedAt
+}
+
+// System-wide setup values are kept in one singleton row.
+
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
 enum ProjectStatus {

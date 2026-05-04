@@ -47,6 +47,7 @@ export class ContractController {
     @Query('userCommitteeId') userCommitteeId?: string,
     @Query('userId') userId?: string,
     @Query('siteInchargeId') siteInchargeId?: string,
+    @Query('fiscalYear') fiscalYear?: string,
     @Request() req?,
   ) {
     return this.contractService.findAll(
@@ -56,6 +57,7 @@ export class ContractController {
         userCommitteeId,
         userId,
         siteInchargeId,
+        fiscalYear,
       },
       req.user,
     );

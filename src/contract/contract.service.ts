@@ -22,6 +22,8 @@ import {
   isAdminUser,
   requireAdminUser,
 } from '../auth/auth-user';
+import { SetupService } from '../setup/setup.service';
+import { getFiscalYearVariants } from '../setup/fiscal-year';
 
 const MILESTONE_ORDER: ContractStatus[] = [
   ContractStatus.NOT_STARTED,
@@ -37,6 +39,7 @@ const CONTRACT_INCLUDE = {
       id:   true,
       name: true,
       sNo:  true,
+      fiscalYear: true,
       // Site incharge inherited from the project level
       siteIncharge: {
         select: { id: true, name: true, designation: true },
@@ -148,7 +151,10 @@ function buildSequencePrefix(
 
 @Injectable()
 export class ContractService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly setupService?: SetupService,
+  ) {}
 
   private validateMilestoneChange(input: {
     currentStatus: ContractStatus;
@@ -257,8 +263,26 @@ export class ContractService {
     return Array.isArray(target) && target.includes(field);
   }
 
-  private async getNextCompletionCode(referenceDate: Date) {
-    const { prefix } = getFiscalYearSequenceWindow('CCR', referenceDate);
+  private async getProjectFiscalYear(projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { fiscalYear: true },
+    });
+
+    if (!project) {
+      throw new NotFoundException(`Project ${projectId} not found`);
+    }
+
+    return project.fiscalYear;
+  }
+
+  private async getNextCompletionCode(
+    referenceDate: Date,
+    fiscalYear?: string | null,
+  ) {
+    const prefix = fiscalYear
+      ? buildSequencePrefix('CCR', fiscalYear, referenceDate)
+      : getFiscalYearSequenceWindow('CCR', referenceDate).prefix;
     const count = await this.prisma.contract.count({
       where: {
         completionCode: { startsWith: prefix },
@@ -319,6 +343,10 @@ export class ContractService {
       fiscalYear = project.fiscalYear;
     }
 
+    if (!fiscalYear) {
+      fiscalYear = await this.setupService?.getCurrentFiscalYear();
+    }
+
     const prefix = buildSequencePrefix('CNT', fiscalYear);
 
     const count = await this.prisma.contract.count({
@@ -339,9 +367,16 @@ export class ContractService {
       nextStatus === ContractStatus.COMPLETED
         ? dto.actualCompletionDate ?? new Date()
         : dto.actualCompletionDate;
+    const projectFiscalYear =
+      nextStatus === ContractStatus.COMPLETED
+        ? await this.getProjectFiscalYear(rest.projectId)
+        : undefined;
     const completionCode =
       nextStatus === ContractStatus.COMPLETED
-        ? await this.getNextCompletionCode(actualCompletionDate ?? new Date())
+        ? await this.getNextCompletionCode(
+            actualCompletionDate ?? new Date(),
+            projectFiscalYear,
+          )
         : undefined;
 
     if (nextStatus !== ContractStatus.NOT_STARTED) {
@@ -406,6 +441,7 @@ export class ContractService {
     // Filters by contract's OWN siteInchargeId — not inherited from project.
     // Use GET /contracts?siteInchargeId=<uuid> to list all contracts for a user.
     siteInchargeId?:  string;
+    fiscalYear?:      string;
   }, user: AuthUser) {
     const {
       projectId,
@@ -413,11 +449,18 @@ export class ContractService {
       userCommitteeId,
       userId,
       siteInchargeId,
+      fiscalYear,
     } = params;
+    const fiscalYearVariants = getFiscalYearVariants(fiscalYear);
 
     return this.prisma.contract.findMany({
       where: {
-        ...getApprovalVisibilityWhere(user),
+        AND: [
+          getApprovalVisibilityWhere(user),
+          ...(fiscalYearVariants.length
+            ? [{ project: { fiscalYear: { in: fiscalYearVariants } } }]
+            : []),
+        ],
         ...(projectId       && { projectId }),
         ...(companyId       && { companyId }),
         ...(userCommitteeId && { userCommitteeId }),
@@ -453,6 +496,9 @@ export class ContractService {
         finalEvaluatedAmount: true,
         approvalStatus: true,
         approvedAt: true,
+        project: {
+          select: { fiscalYear: true },
+        },
         agreement: {
           select: { id: true },
         },
@@ -505,6 +551,7 @@ export class ContractService {
         const completionCode = shouldGenerateCompletionCode
           ? await this.getNextCompletionCode(
               resolvedActualCompletionDate ?? new Date(),
+              existingContract.project?.fiscalYear,
             )
           : undefined;
 
@@ -589,6 +636,9 @@ export class ContractService {
         siteInchargeId: true,
         userID: true,
         completionCode: true,
+        project: {
+          select: { fiscalYear: true },
+        },
       },
     });
 
@@ -615,7 +665,10 @@ export class ContractService {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const completionCode = shouldGenerateCompletionCode
-          ? await this.getNextCompletionCode(actualCompletionDate)
+          ? await this.getNextCompletionCode(
+              actualCompletionDate,
+              existingContract.project?.fiscalYear,
+            )
           : undefined;
 
         return await this.prisma.contract.update({

@@ -16,6 +16,10 @@ import {
   getApprovalVisibilityWhere,
   requireAdminUser,
 } from '../auth/auth-user';
+import {
+  getFiscalYearVariants,
+  normalizeFiscalYear,
+} from '../setup/fiscal-year';
 
 @Injectable()
 export class UserCommitteeService {
@@ -63,12 +67,14 @@ export class UserCommitteeService {
 
   async create(dto: CreateUserCommitteeDto, user: AuthUser) {
     const { officials, formedDate, ...rest } = dto;
+    const fiscalYear = normalizeFiscalYear(rest.fiscalYear) ?? rest.fiscalYear;
 
     this.validateLeadershipRoles(officials);
 
     return this.prisma.userCommittee.create({
       data: {
         ...rest,
+        fiscalYear,
         formedDate: formedDate!,
         ...getApprovalStateForSave(user),
         officials: {
@@ -84,6 +90,7 @@ export class UserCommitteeService {
   async findAll(query: QueryUserCommitteeDto, user: AuthUser) {
     const { search, fiscalYear, page, limit } = query;
     const skip = (page - 1) * limit;
+    const fiscalYearVariants = getFiscalYearVariants(fiscalYear);
 
     const where: Prisma.UserCommitteeWhereInput = {
       AND: [
@@ -104,7 +111,9 @@ export class UserCommitteeService {
               ],
             }
           : {},
-        fiscalYear ? { fiscalYear } : {},
+        fiscalYearVariants.length
+          ? { fiscalYear: { in: fiscalYearVariants } }
+          : {},
       ],
     };
 
@@ -158,6 +167,10 @@ export class UserCommitteeService {
     await this.findOne(id, user);
 
     const { officials, formedDate, ...rest } = dto;
+    const fiscalYear =
+      rest.fiscalYear == null
+        ? undefined
+        : normalizeFiscalYear(rest.fiscalYear) ?? rest.fiscalYear;
 
     if (officials) {
       this.validateLeadershipRoles(officials);
@@ -167,6 +180,7 @@ export class UserCommitteeService {
       where: { id },
       data: {
         ...rest,
+        fiscalYear,
         ...getApprovalStateForSave(user),
         ...(formedDate && { formedDate }),
         ...(officials && {

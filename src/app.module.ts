@@ -11,14 +11,14 @@ import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
 import { UserCommitteeService } from './user-committee/user-committee.service';
 import { UserCommitteeController } from './user-committee/user-committee.controller';
+import { SetupModule } from './setup/setup.module';
 
 @Module({
   imports: [ConfigModule.forRoot({
       isGlobal: true, // Makes .env available to all modules (including Prisma)
     }),
-    PrismaModule, CompanyModule, ProjectModule, ContractModule, UserModule, AuthModule],
+    PrismaModule, CompanyModule, ProjectModule, ContractModule, UserModule, AuthModule, SetupModule],
   controllers: [AppController, UserCommitteeController],
   providers: [AppService, PrismaService, UserCommitteeService],
 })
 export class AppModule {}
-   
