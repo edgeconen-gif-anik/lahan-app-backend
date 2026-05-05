@@ -31,6 +31,16 @@
 $ npm install
 ```
 
+## Email setup
+
+Password reset email uses SMTP through Nodemailer. For a free setup, copy
+`.env.example` to `.env`, use Gmail SMTP, and set `SMTP_USER` plus a Google App
+Password in `SMTP_PASS`. In local development, if SMTP is not configured, the
+backend logs the reset link so password reset can still be tested.
+
+If Google sign-in is enabled, set `GOOGLE_CLIENT_ID` in the backend too. The
+backend verifies the Google ID token before creating a session.
+
 ## Compile and run the project
 
 ```bash

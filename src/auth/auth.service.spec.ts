@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
   let service: AuthService;
+  const originalFrontendUrl = process.env.FRONTEND_URL;
   const usersService = {
     findByEmail: jest.fn(),
   };
@@ -11,6 +12,10 @@ describe('AuthService', () => {
     verify: jest.fn(),
   };
   const prisma = {
+    session: {
+      create: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     verificationToken: {
       create: jest.fn(),
       delete: jest.fn(),
@@ -23,16 +28,28 @@ describe('AuthService', () => {
     },
     $transaction: jest.fn(),
   };
+  const mailService = {
+    sendPasswordResetEmail: jest.fn(),
+  };
 
   beforeEach(() => {
+    process.env.FRONTEND_URL = 'http://localhost:3000';
+
     service = new AuthService(
       usersService as any,
       jwtService as any,
       prisma as any,
+      mailService as any,
     );
   });
 
   afterEach(() => {
+    if (originalFrontendUrl === undefined) {
+      delete process.env.FRONTEND_URL;
+    } else {
+      process.env.FRONTEND_URL = originalFrontendUrl;
+    }
+
     jest.restoreAllMocks();
     jest.clearAllMocks();
   });
@@ -48,8 +65,7 @@ describe('AuthService', () => {
     });
     prisma.verificationToken.deleteMany.mockResolvedValue({ count: 1 });
     prisma.verificationToken.create.mockResolvedValue({});
-
-    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    mailService.sendPasswordResetEmail.mockResolvedValue(false);
 
     const response = await service.forgotPassword('user@example.com');
 
@@ -57,26 +73,34 @@ describe('AuthService', () => {
       'If an account with that email exists, a password reset link has been generated.',
     );
     expect(response.resetUrl).toMatch(
-      /^http:\/\/localhost:3000\/reset-password\?token=/
+      /^http:\/\/localhost:3000\/reset-password\?token=/,
     );
 
     expect(prisma.verificationToken.deleteMany).toHaveBeenCalledWith({
       where: { identifier: 'password-reset:user@example.com' },
     });
     expect(prisma.verificationToken.create).toHaveBeenCalledTimes(1);
-    expect(prisma.verificationToken.create.mock.calls[0][0].data.identifier).toBe(
-      'password-reset:user@example.com',
-    );
-    expect(prisma.verificationToken.create.mock.calls[0][0].data.token).toHaveLength(64);
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Password reset link for user@example.com:'),
-    );
+    expect(
+      prisma.verificationToken.create.mock.calls[0][0].data.identifier,
+    ).toBe('password-reset:user@example.com');
+    expect(
+      prisma.verificationToken.create.mock.calls[0][0].data.token,
+    ).toHaveLength(64);
+    expect(mailService.sendPasswordResetEmail).toHaveBeenCalledWith({
+      to: 'user@example.com',
+      resetUrl: expect.stringMatching(
+        /^http:\/\/localhost:3000\/reset-password\?token=/,
+      ),
+      expiresInMinutes: 15,
+    });
   });
 
   it('returns the same generic message when the user does not exist', async () => {
     usersService.findByEmail.mockResolvedValue(null);
 
-    await expect(service.forgotPassword('missing@example.com')).resolves.toEqual({
+    await expect(
+      service.forgotPassword('missing@example.com'),
+    ).resolves.toEqual({
       message:
         'If an account with that email exists, a password reset link has been generated.',
     });
@@ -101,7 +125,9 @@ describe('AuthService', () => {
     prisma.verificationToken.deleteMany.mockReturnValue({} as never);
     prisma.$transaction.mockResolvedValue([]);
 
-    await expect(service.resetPassword(rawToken, 'new-password')).resolves.toEqual({
+    await expect(
+      service.resetPassword(rawToken, 'new-password'),
+    ).resolves.toEqual({
       message: 'Password reset successful',
     });
 
@@ -111,7 +137,9 @@ describe('AuthService', () => {
         password: expect.any(String),
       },
     });
-    expect(prisma.user.update.mock.calls[0][0].data.password).not.toBe('new-password');
+    expect(prisma.user.update.mock.calls[0][0].data.password).not.toBe(
+      'new-password',
+    );
     expect(prisma.verificationToken.deleteMany).toHaveBeenCalledWith({
       where: { identifier: 'password-reset:user@example.com' },
     });

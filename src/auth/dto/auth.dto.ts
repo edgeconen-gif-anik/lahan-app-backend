@@ -2,19 +2,28 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
 export const LoginSchema = z.object({
-  email: z.string().email('Invalid email address').transform((e) => e.toLowerCase()),
+  email: z
+    .string()
+    .email('Invalid email address')
+    .transform((e) => e.toLowerCase()),
   password: z.string().min(1, 'Password is required'),
 });
 
 export const GoogleLoginSchema = z.object({
-  token: z.string().optional(),
-  email: z.string().email('Invalid email address').transform((e) => e.toLowerCase()),
+  token: z.string().min(1, 'Google token is required'),
+  email: z
+    .string()
+    .email('Invalid email address')
+    .transform((e) => e.toLowerCase()),
   name: z.string().min(1).optional(),
   image: z.string().url().optional(),
 });
 
 export const ForgotPasswordSchema = z.object({
-  email: z.string().email('Invalid email address').transform((e) => e.toLowerCase()),
+  email: z
+    .string()
+    .email('Invalid email address')
+    .transform((e) => e.toLowerCase()),
 });
 
 export const ResetPasswordSchema = z.object({

@@ -7,16 +7,16 @@ import { PassportModule } from '@nestjs/passport';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtStrategy } from './strategy/jwt.strategy';
 import { AUTH_ACCESS_TOKEN_MAX_AGE } from './session-config';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
     UserModule,
+    MailModule,
     PassportModule,
     JwtModule.register({
       secret:
-        process.env.JWT_SECRET ||
-        process.env.JWT_SECRET_KEY ||
-        'secretKey', // Use a .env var in production!
+        process.env.JWT_SECRET || process.env.JWT_SECRET_KEY || 'secretKey', // Use a .env var in production!
       signOptions: { expiresIn: AUTH_ACCESS_TOKEN_MAX_AGE },
     }),
   ],

@@ -1,17 +1,30 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { getIdleSessionExpiry } from './session-config';
+import { MailService } from '../mail/mail.service';
 
 interface GoogleUserDto {
   email: string;
   name?: string;
   image?: string;
-  token?: string;
+  token: string;
 }
+
+type VerifiedGoogleUser = {
+  email: string;
+  name?: string;
+  image?: string;
+};
 
 const PASSWORD_RESET_PREFIX = 'password-reset:';
 const PASSWORD_RESET_TTL_MINUTES = 15;
@@ -20,50 +33,63 @@ const PASSWORD_RESET_MESSAGE =
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+  private readonly googleClient = new OAuth2Client();
+
   constructor(
     private readonly usersService: UserService,
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
   ) {}
 
   async validateUser(email: string, pass: string): Promise<any> {
+    const normalizedEmail = email.trim().toLowerCase();
+
     try {
-      const user = await this.usersService.findByEmail(email);
+      const user = await this.usersService.findByEmail(normalizedEmail);
 
       if (!user) {
-        console.log('User not found:', email);
+        this.logger.debug(`Invalid login attempt for ${normalizedEmail}`);
         return null;
       }
 
       if (!user.password) {
-        console.log('No password set for user:', email);
-        console.log('   (This user may have registered via Google)');
+        this.logger.debug(`Password login unavailable for ${normalizedEmail}`);
         return null;
       }
 
       const isMatch = await bcrypt.compare(pass, user.password);
 
       if (isMatch) {
-        console.log('Password match for:', email);
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { password, ...result } = user;
         return result;
       }
 
-      console.log('Password mismatch for:', email);
+      this.logger.debug(`Invalid login attempt for ${normalizedEmail}`);
       return null;
     } catch (error) {
-      console.error('Error in validateUser:', error);
+      this.logger.error('Error while validating credentials', error);
       return null;
     }
   }
 
   async login(user: any) {
+    const now = new Date();
+
+    await this.prisma.session.deleteMany({
+      where: {
+        userId: user.id,
+        expires: { lt: now },
+      },
+    });
+
     const session = await this.prisma.session.create({
       data: {
         sessionToken: randomBytes(32).toString('hex'),
         userId: user.id,
-        expires: getIdleSessionExpiry(),
+        expires: getIdleSessionExpiry(now),
       },
     });
 
@@ -77,7 +103,7 @@ export class AuthService {
 
     const accessToken = this.jwtService.sign(payload);
 
-    console.log('JWT generated for:', user.email);
+    this.logger.log(`Login session created for ${user.email}`);
 
     return {
       id: user.id,
@@ -90,43 +116,94 @@ export class AuthService {
     };
   }
 
+  async logout(sessionToken?: string) {
+    if (sessionToken) {
+      await this.prisma.session.deleteMany({
+        where: { sessionToken },
+      });
+    }
+
+    return { message: 'Logged out' };
+  }
+
   async findOrCreateGoogleUser(googleDto: GoogleUserDto) {
     try {
-      let user = await this.usersService.findByEmail(googleDto.email);
+      const googleUser = await this.verifyGoogleUser(googleDto);
+      let user = await this.usersService.findByEmail(googleUser.email);
 
       if (user) {
-        console.log('Existing user found for Google login:', googleDto.email);
+        this.logger.log(
+          `Existing user found for Google login: ${googleUser.email}`,
+        );
 
         user = await this.prisma.user.update({
           where: { id: user.id },
           data: {
-            name: googleDto.name || user.name,
-            image: googleDto.image || user.image,
+            name: googleUser.name || user.name,
+            image: googleUser.image || user.image,
             emailVerified: new Date(),
           },
         });
       } else {
-        console.log('Creating new user from Google login:', googleDto.email);
+        this.logger.log(
+          `Creating new user from Google login: ${googleUser.email}`,
+        );
 
         user = await this.prisma.user.create({
           data: {
-            email: googleDto.email,
-            name: googleDto.name,
-            image: googleDto.image,
+            email: googleUser.email,
+            name: googleUser.name,
+            image: googleUser.image,
             emailVerified: new Date(),
           },
         });
 
-        console.log('New user created:', user.id);
+        this.logger.log(`New Google user created: ${user.id}`);
       }
 
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { password, ...result } = user;
       return result;
     } catch (error) {
-      console.error('Error in findOrCreateGoogleUser:', error);
+      this.logger.error('Error in findOrCreateGoogleUser', error);
       throw error;
     }
+  }
+
+  private async verifyGoogleUser(
+    googleDto: GoogleUserDto,
+  ): Promise<VerifiedGoogleUser> {
+    const clientId =
+      process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+
+    if (!clientId) {
+      this.logger.error(
+        'GOOGLE_CLIENT_ID is required for backend Google login',
+      );
+      throw new UnauthorizedException('Google login is not configured');
+    }
+
+    const ticket = await this.googleClient.verifyIdToken({
+      idToken: googleDto.token,
+      audience: clientId,
+    });
+    const payload = ticket.getPayload();
+    const verifiedEmail = payload?.email?.trim().toLowerCase();
+    const requestedEmail = googleDto.email.trim().toLowerCase();
+
+    if (!verifiedEmail || payload?.email_verified !== true) {
+      throw new UnauthorizedException('Google email is not verified');
+    }
+
+    if (verifiedEmail !== requestedEmail) {
+      throw new UnauthorizedException('Google email does not match token');
+    }
+
+    return {
+      email: verifiedEmail,
+      name: payload.name || googleDto.name,
+      image: payload.picture || googleDto.image,
+    };
   }
 
   async verifyToken(token: string) {
@@ -148,7 +225,9 @@ export class AuthService {
     const identifier = this.getPasswordResetIdentifier(normalizedEmail);
     const rawToken = randomBytes(32).toString('hex');
     const hashedToken = this.hashResetToken(rawToken);
-    const expires = new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000);
+    const expires = new Date(
+      Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000,
+    );
 
     await this.prisma.verificationToken.deleteMany({
       where: { identifier },
@@ -162,17 +241,29 @@ export class AuthService {
       },
     });
 
-    const frontendUrl = (process.env.FRONTEND_URL || 'https://lahan-app-frontend.onrender.com').replace(
-      /\/$/,
-      '',
-    );
+    const frontendUrl = (
+      process.env.FRONTEND_URL || 'https://lahan-app-frontend.onrender.com'
+    ).replace(/\/$/, '');
     const resetUrl = `${frontendUrl}/reset-password?token=${rawToken}`;
 
-    console.log(`Password reset link for ${normalizedEmail}: ${resetUrl}`);
+    let emailSent = false;
+
+    try {
+      emailSent = await this.mailService.sendPasswordResetEmail({
+        to: normalizedEmail,
+        resetUrl,
+        expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Unable to send password reset email to ${normalizedEmail}`,
+        error,
+      );
+    }
 
     return {
       message: PASSWORD_RESET_MESSAGE,
-      resetUrl,
+      ...(this.shouldExposeResetUrl(emailSent) ? { resetUrl } : {}),
     };
   }
 
@@ -186,7 +277,9 @@ export class AuthService {
       throw new BadRequestException('Reset token is invalid or has expired');
     }
 
-    const email = this.getEmailFromPasswordResetIdentifier(verificationToken.identifier);
+    const email = this.getEmailFromPasswordResetIdentifier(
+      verificationToken.identifier,
+    );
 
     if (!email) {
       await this.prisma.verificationToken.delete({
@@ -233,5 +326,9 @@ export class AuthService {
     }
 
     return identifier.slice(PASSWORD_RESET_PREFIX.length);
+  }
+
+  private shouldExposeResetUrl(emailSent: boolean) {
+    return !emailSent && process.env.NODE_ENV !== 'production';
   }
 }

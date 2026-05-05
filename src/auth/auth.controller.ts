@@ -3,6 +3,7 @@ import {
   Controller,
   HttpCode,
   HttpStatus,
+  Logger,
   Post,
   Request,
   UnauthorizedException,
@@ -19,41 +20,44 @@ import { JwtAuthGuard } from './guard/jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(private readonly authService: AuthService) {}
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto) {
-    console.log('Login attempt for:', loginDto.email);
-
     const user = await this.authService.validateUser(
       loginDto.email,
       loginDto.password,
     );
 
     if (!user) {
-      console.log('Invalid credentials for:', loginDto.email);
+      this.logger.warn(`Invalid login attempt for ${loginDto.email}`);
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    console.log('Login successful for:', loginDto.email);
     return this.authService.login(user);
   }
 
   @Post('google-login')
   @HttpCode(HttpStatus.OK)
   async googleLogin(@Body() googleDto: GoogleLoginDto) {
-    console.log('Google login attempt for:', googleDto.email);
-
     try {
       const user = await this.authService.findOrCreateGoogleUser(googleDto);
 
-      console.log('Google login successful for:', googleDto.email);
       return this.authService.login(user);
     } catch (error) {
-      console.error('Google login error:', error);
+      this.logger.error(`Google login failed for ${googleDto.email}`, error);
       throw new UnauthorizedException('Google authentication failed');
     }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  async logout(@Request() req) {
+    return this.authService.logout(req.user.sessionToken);
   }
 
   @Post('forgot-password')
