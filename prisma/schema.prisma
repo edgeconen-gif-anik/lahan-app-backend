@@ -7,27 +7,27 @@ datasource db {
 }
 
 model User {
-  id                   String     @id @default(uuid())
-  name                 String?
-  email                String?    @unique
-  role                 Role?
-  designation          Designation?
-  createdAt            DateTime   @default(now())
-  updatedAt            DateTime   @updatedAt
-  emailVerified        DateTime?
-  image                String?
-  password             String?
-  accounts             Account[]
-  sessions             Session[]
+  id            String       @id @default(uuid())
+  name          String?
+  email         String?      @unique
+  role          Role?
+  designation   Designation?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  accounts      Account[]
+  sessions      Session[]
 
   // User as a committee representative on a contract (the old `userID` relation)
-  contracts            Contract[] @relation("ContractCommitteeRep")
+  contracts Contract[] @relation("ContractCommitteeRep")
 
   // User as site incharge on a Project
-  siteInchargeProjects Project[]  @relation("SiteIncharge")
+  siteInchargeProjects Project[] @relation("SiteIncharge")
 
   // ✅ NEW: User as site incharge directly on a Contract
-  managedContracts     Contract[] @relation("ContractSiteIncharge")
+  managedContracts Contract[] @relation("ContractSiteIncharge")
 
   // managedProjects   Project[]  @relation("ProjectManager")
 }
@@ -67,23 +67,23 @@ model VerificationToken {
 }
 
 model Company {
-  id                      String          @id @default(uuid())
+  id                      String           @id @default(uuid())
   name                    String
-  panNumber               Int             @unique
+  panNumber               Int              @unique
   address                 String
   contactPerson           String?
   phoneNumber             String?
-  email                   String?         @unique
+  email                   String?          @unique
   registrationRequestDate DateTime?
   registrationDate        DateTime?
   category                CompanyCategory?
-  isContracted            Boolean         @default(false)
-  panVerified             Boolean         @default(false)
-  approvalStatus          ApprovalStatus  @default(APPROVED)
+  isContracted            Boolean          @default(false)
+  panVerified             Boolean          @default(false)
+  approvalStatus          ApprovalStatus   @default(APPROVED)
   approvedAt              DateTime?
   remarks                 String?
-  createdAt               DateTime        @default(now())
-  updatedAt               DateTime        @updatedAt
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
   voucherNo               String?
   contracts               Contract[]
   projects                Project[]
@@ -93,20 +93,20 @@ model Company {
 }
 
 model UserCommittee {
-  id            String              @id @default(uuid())
-  name          String
-  address       String
-  fiscalYear    String
-  formedDate    DateTime
-  bankName      String
-  accountNumber String
-  approvalStatus ApprovalStatus     @default(APPROVED)
+  id             String              @id @default(uuid())
+  name           String
+  address        String
+  fiscalYear     String
+  formedDate     DateTime
+  bankName       String
+  accountNumber  String
+  approvalStatus ApprovalStatus      @default(APPROVED)
   approvedAt     DateTime?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  officials     CommitteeOfficial[]
-  contracts     Contract[]
-  projects      Project[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  officials      CommitteeOfficial[]
+  contracts      Contract[]
+  projects       Project[]
 
   @@index([name])
   @@index([fiscalYear])
@@ -125,7 +125,7 @@ model CommitteeOfficial {
 
 model Project {
   id               String                   @id @default(uuid())
-  name             String                   @unique
+  name             String
   type             String
   budgetCode       String
   source           String
@@ -149,6 +149,7 @@ model Project {
   userCommittee    UserCommittee?           @relation(fields: [userCommitteeId], references: [id])
   // projectManager User?                    @relation("ProjectManager", fields: [projectManagerId], references: [id])
 
+  @@unique([name, type, budgetCode, fiscalYear])
   @@index([status])
   @@index([budgetCode])
   @@index([fiscalYear])
@@ -159,9 +160,10 @@ model Contract {
   id                     String         @id @default(uuid())
   projectId              String
   companyId              String?
-  userID                 String?        // committee representative user
-  siteInchargeId         String?        // ✅ NEW: site incharge for this contract
+  userID                 String? // committee representative user
+  siteInchargeId         String? // ✅ NEW: site incharge for this contract
   contractNumber         String         @unique
+  fiscalYear             String
   completionCode         String?        @unique
   contractAmount         Decimal
   finalEvaluatedAmount   Decimal?
@@ -183,14 +185,15 @@ model Contract {
   userCommittee UserCommittee? @relation(fields: [userCommitteeId], references: [id])
 
   // committee representative (existing)
-  user          User?          @relation("ContractCommitteeRep", fields: [userID], references: [id])
+  user User? @relation("ContractCommitteeRep", fields: [userID], references: [id])
 
   // ✅ NEW: site incharge directly on the contract
-  siteIncharge  User?          @relation("ContractSiteIncharge", fields: [siteInchargeId], references: [id])
+  siteIncharge User? @relation("ContractSiteIncharge", fields: [siteInchargeId], references: [id])
 
   @@index([projectId])
   @@index([companyId])
   @@index([userCommitteeId])
+  @@index([fiscalYear])
   @@index([siteInchargeId]) // ✅ NEW: for fast filtering by site incharge
 }
 

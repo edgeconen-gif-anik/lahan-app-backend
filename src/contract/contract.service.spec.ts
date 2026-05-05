@@ -31,6 +31,7 @@ describe('ContractService', () => {
 
   beforeEach(() => {
     service = new ContractService(prisma as any);
+    prisma.project.findUnique.mockResolvedValue({ fiscalYear: '2082/083' });
   });
 
   afterEach(() => {

@@ -3,8 +3,8 @@ export interface ProjectCsvRow {
   type: string;
   sNo?: string;
   budgetCode: string;
-  fiscalYear: string;
-  source: string;  
+  fiscalYear?: string;
+  source: string;
 
   allocatedBudget: string | number;
   internalBudget?: string | number;

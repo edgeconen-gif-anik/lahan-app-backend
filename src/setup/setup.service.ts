@@ -67,24 +67,34 @@ export class SetupService {
   }
 
   async listFiscalYears() {
-    const [settings, projectYears, committeeYears] = await Promise.all([
-      this.getSettings(),
-      this.prisma.project.findMany({
-        distinct: ['fiscalYear'],
-        select: { fiscalYear: true },
-        where: { fiscalYear: { not: '' } },
-      }),
-      this.prisma.userCommittee.findMany({
-        distinct: ['fiscalYear'],
-        select: { fiscalYear: true },
-        where: { fiscalYear: { not: '' } },
-      }),
-    ]);
+    const [settings, projectYears, committeeYears, contractYears] =
+      await Promise.all([
+        this.getSettings(),
+        this.prisma.project.findMany({
+          distinct: ['fiscalYear'],
+          select: { fiscalYear: true },
+          where: { fiscalYear: { not: '' } },
+        }),
+        this.prisma.userCommittee.findMany({
+          distinct: ['fiscalYear'],
+          select: { fiscalYear: true },
+          where: { fiscalYear: { not: '' } },
+        }),
+        this.prisma.contract.findMany({
+          distinct: ['fiscalYear'],
+          select: { fiscalYear: true },
+          where: { fiscalYear: { not: '' } },
+        }),
+      ]);
 
     const fiscalYears = new Set<string>();
     fiscalYears.add(settings.currentFiscalYear);
 
-    for (const record of [...projectYears, ...committeeYears]) {
+    for (const record of [
+      ...projectYears,
+      ...committeeYears,
+      ...contractYears,
+    ]) {
       const normalized = normalizeFiscalYear(record.fiscalYear);
       if (normalized) {
         fiscalYears.add(normalized);

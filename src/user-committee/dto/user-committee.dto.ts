@@ -26,20 +26,24 @@ const OfficialSchema = z.object({
 export const CreateUserCommitteeSchema = z.object({
   name: z.string().min(3, 'Committee name is required'),
   address: z.string().min(3, 'Address is required'),
-  fiscalYear: z.string().regex(/^\d{4}\s*[/-]\s*\d{2,3}$/, 'Must be format like 2080/081'),
+  fiscalYear: z
+    .string()
+    .regex(/^\d{4}\s*[/-]\s*\d{2,3}$/, 'Must be format like 2082/083')
+    .optional()
+    .or(z.literal('')),
   formedDate: z
-  .union([
-    z.coerce.date(),
-    z.string().length(0) // allow empty string
-  ])
-  .optional()
-  .transform((val) => {
-    if (!val || val === "") return undefined;
-    return val instanceof Date ? val : new Date(val);
-  }), // Coerces string like "2026-03-09" to a Date object
+    .union([
+      z.coerce.date(),
+      z.string().length(0), // allow empty string
+    ])
+    .optional()
+    .transform((val) => {
+      if (!val || val === '') return undefined;
+      return val instanceof Date ? val : new Date(val);
+    }), // Coerces string like "2026-03-09" to a Date object
   bankName: z.string().min(2, 'Bank name is required'),
   accountNumber: z.string().min(5, 'Account number is required'),
-  
+
   // Optional array of officials to create along with the committee
   officials: z.array(OfficialSchema).optional(),
 });
@@ -55,6 +59,12 @@ export const QueryUserCommitteeSchema = z.object({
   limit: z.coerce.number().min(1).default(10),
 });
 
-export class CreateUserCommitteeDto extends createZodDto(CreateUserCommitteeSchema) {}
-export class UpdateUserCommitteeDto extends createZodDto(UpdateUserCommitteeSchema) {}
-export class QueryUserCommitteeDto extends createZodDto(QueryUserCommitteeSchema) {}
+export class CreateUserCommitteeDto extends createZodDto(
+  CreateUserCommitteeSchema,
+) {}
+export class UpdateUserCommitteeDto extends createZodDto(
+  UpdateUserCommitteeSchema,
+) {}
+export class QueryUserCommitteeDto extends createZodDto(
+  QueryUserCommitteeSchema,
+) {}

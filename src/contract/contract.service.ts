@@ -23,7 +23,10 @@ import {
   requireAdminUser,
 } from '../auth/auth-user';
 import { SetupService } from '../setup/setup.service';
-import { getFiscalYearVariants } from '../setup/fiscal-year';
+import {
+  getFiscalYearVariants,
+  normalizeFiscalYear,
+} from '../setup/fiscal-year';
 
 const MILESTONE_ORDER: ContractStatus[] = [
   ContractStatus.NOT_STARTED,
@@ -36,9 +39,9 @@ const MILESTONE_ORDER: ContractStatus[] = [
 const CONTRACT_INCLUDE = {
   project: {
     select: {
-      id:   true,
+      id: true,
       name: true,
-      sNo:  true,
+      sNo: true,
       fiscalYear: true,
       // Site incharge inherited from the project level
       siteIncharge: {
@@ -47,12 +50,12 @@ const CONTRACT_INCLUDE = {
     },
   },
   // ✅ Site incharge stored directly on the contract
-  siteIncharge:  { select: { id: true, name: true, designation: true } },
-  company:       { select: { id: true, name: true, panNumber: true } },
+  siteIncharge: { select: { id: true, name: true, designation: true } },
+  company: { select: { id: true, name: true, panNumber: true } },
   userCommittee: { select: { id: true, name: true } },
-  user:          { select: { id: true, name: true, designation: true } },
-  agreement:     true,
-  workOrder:     true,
+  user: { select: { id: true, name: true, designation: true } },
+  agreement: true,
+  workOrder: true,
 } satisfies Prisma.ContractInclude;
 
 // ── Nepali fiscal year helpers ────────────────────────────────────────────────
@@ -76,22 +79,23 @@ function getFiscalYearSequenceWindow(
   end: Date;
   prefix: string;
 } {
-  const now   = referenceDate;
+  const now = referenceDate;
   const month = now.getMonth() + 1;
-  const year  = now.getFullYear();
+  const day = now.getDate();
+  const year = now.getFullYear();
 
   // ❶ FY BOUNDARY MONTH
   // Nepal: Shrawan 1 ≈ July 16, so >= 7 (July) is safe.
-  const fyStartYear = month >= 7 ? year : year - 1;
-  const fyEndYear   = fyStartYear + 1;
+  const fyStartYear = month > 7 || (month === 7 && day >= 16) ? year : year - 1;
+  const fyEndYear = fyStartYear + 1;
 
   // ❷ DATE RANGE USED FOR COUNTING — July 1 → June 30
-  const start = new Date(fyStartYear, 6, 1);  // 6 = July (0-indexed)
-  const end   = new Date(fyEndYear,   5, 30); // 5 = June
+  const start = new Date(fyStartYear, 6, 16);
+  const end = new Date(fyEndYear, 6, 15);
 
   // ❸ AD → BS YEAR CONVERSION
   // BS is ahead of AD by 56 or 57 years depending on the time of year.
-  const bsStartYear   = fyStartYear + (month >= 4 ? 57 : 56);
+  const bsStartYear = fyStartYear + 57;
   const bsEndTwoDigit = String(bsStartYear + 1).slice(-2);
 
   // ❹ PREFIX FORMAT → "CNT-2081-82-"
@@ -198,13 +202,19 @@ export class ContractService {
       throw new BadRequestException('Contract milestone cannot move backwards');
     }
 
-    if (nextIndex >= MILESTONE_ORDER.indexOf(ContractStatus.AGREEMENT) && !hasAgreement) {
+    if (
+      nextIndex >= MILESTONE_ORDER.indexOf(ContractStatus.AGREEMENT) &&
+      !hasAgreement
+    ) {
       throw new BadRequestException(
         'Agreement details are required for AGREEMENT milestone or later',
       );
     }
 
-    if (nextIndex >= MILESTONE_ORDER.indexOf(ContractStatus.WORKORDER) && !hasWorkOrder) {
+    if (
+      nextIndex >= MILESTONE_ORDER.indexOf(ContractStatus.WORKORDER) &&
+      !hasWorkOrder
+    ) {
       throw new BadRequestException(
         'Work order details are required for WORKORDER milestone or later',
       );
@@ -273,7 +283,7 @@ export class ContractService {
       throw new NotFoundException(`Project ${projectId} not found`);
     }
 
-    return project.fiscalYear;
+    return normalizeFiscalYear(project.fiscalYear) ?? project.fiscalYear;
   }
 
   private async getNextCompletionCode(
@@ -309,7 +319,7 @@ export class ContractService {
         approvalStatus: existingContract.approvalStatus,
         approvedAt:
           existingContract.approvalStatus === ApprovalStatus.APPROVED
-            ? existingContract.approvedAt ?? new Date()
+            ? (existingContract.approvedAt ?? new Date())
             : existingContract.approvedAt,
       };
     }
@@ -355,32 +365,30 @@ export class ContractService {
       },
     });
 
-    const sequence       = count + 1;
+    const sequence = count + 1;
     const contractNumber = `${prefix}${String(sequence).padStart(4, '0')}`;
     return { contractNumber, sequence };
   }
 
   async create(dto: CreateContractDto, user: AuthUser) {
-    const { agreement, workOrder, contractAmount, finalEvaluatedAmount, ...rest } = dto;
+    const {
+      agreement,
+      workOrder,
+      contractAmount,
+      finalEvaluatedAmount,
+      ...rest
+    } = dto;
     const nextStatus = dto.status ?? ContractStatus.NOT_STARTED;
     const actualCompletionDate =
       nextStatus === ContractStatus.COMPLETED
-        ? dto.actualCompletionDate ?? new Date()
+        ? (dto.actualCompletionDate ?? new Date())
         : dto.actualCompletionDate;
-    const projectFiscalYear =
-      nextStatus === ContractStatus.COMPLETED
-        ? await this.getProjectFiscalYear(rest.projectId)
-        : undefined;
-    const completionCode =
-      nextStatus === ContractStatus.COMPLETED
-        ? await this.getNextCompletionCode(
-            actualCompletionDate ?? new Date(),
-            projectFiscalYear,
-          )
-        : undefined;
 
     if (nextStatus !== ContractStatus.NOT_STARTED) {
-      requireAdminUser(user, 'Only admins can set an initial contract milestone');
+      requireAdminUser(
+        user,
+        'Only admins can set an initial contract milestone',
+      );
       this.validateMilestoneChange({
         currentStatus: ContractStatus.NOT_STARTED,
         nextStatus,
@@ -391,17 +399,26 @@ export class ContractService {
       });
     }
 
+    const projectFiscalYear = await this.getProjectFiscalYear(rest.projectId);
+    const completionCode =
+      nextStatus === ContractStatus.COMPLETED
+        ? await this.getNextCompletionCode(
+            actualCompletionDate ?? new Date(),
+            projectFiscalYear,
+          )
+        : undefined;
+
     try {
       return await this.prisma.contract.create({
         data: {
           ...rest,
+          fiscalYear: projectFiscalYear,
           ...getApprovalStateForSave(user),
           actualCompletionDate,
           completionCode,
           contractAmount: new Prisma.Decimal(contractAmount),
-          finalEvaluatedAmount: this.getFinalEvaluatedAmountPatch(
-            finalEvaluatedAmount,
-          ),
+          finalEvaluatedAmount:
+            this.getFinalEvaluatedAmountPatch(finalEvaluatedAmount),
           agreement: agreement
             ? {
                 create: {
@@ -433,16 +450,19 @@ export class ContractService {
     }
   }
 
-  async findAll(params: {
-    projectId?:       string;
-    companyId?:       string;
-    userCommitteeId?: string;
-    userId?:          string;
-    // Filters by contract's OWN siteInchargeId — not inherited from project.
-    // Use GET /contracts?siteInchargeId=<uuid> to list all contracts for a user.
-    siteInchargeId?:  string;
-    fiscalYear?:      string;
-  }, user: AuthUser) {
+  async findAll(
+    params: {
+      projectId?: string;
+      companyId?: string;
+      userCommitteeId?: string;
+      userId?: string;
+      // Filters by contract's OWN siteInchargeId — not inherited from project.
+      // Use GET /contracts?siteInchargeId=<uuid> to list all contracts for a user.
+      siteInchargeId?: string;
+      fiscalYear?: string;
+    },
+    user: AuthUser,
+  ) {
     const {
       projectId,
       companyId,
@@ -458,14 +478,21 @@ export class ContractService {
         AND: [
           getApprovalVisibilityWhere(user),
           ...(fiscalYearVariants.length
-            ? [{ project: { fiscalYear: { in: fiscalYearVariants } } }]
+            ? [
+                {
+                  OR: [
+                    { fiscalYear: { in: fiscalYearVariants } },
+                    { project: { fiscalYear: { in: fiscalYearVariants } } },
+                  ],
+                },
+              ]
             : []),
         ],
-        ...(projectId       && { projectId }),
-        ...(companyId       && { companyId }),
+        ...(projectId && { projectId }),
+        ...(companyId && { companyId }),
         ...(userCommitteeId && { userCommitteeId }),
-        ...(userId          && { userID: userId }),   // schema field is userID
-        ...(siteInchargeId  && { siteInchargeId }),   // ✅ direct field on Contract
+        ...(userId && { userID: userId }), // schema field is userID
+        ...(siteInchargeId && { siteInchargeId }), // ✅ direct field on Contract
       },
       include: CONTRACT_INCLUDE,
       orderBy: { createdAt: 'desc' },
@@ -487,6 +514,7 @@ export class ContractService {
       select: {
         id: true,
         projectId: true,
+        fiscalYear: true,
         status: true,
         startDate: true,
         siteInchargeId: true,
@@ -512,21 +540,39 @@ export class ContractService {
       throw new NotFoundException(`Contract ${id} not found`);
     }
 
-    const { agreement, workOrder, contractAmount, finalEvaluatedAmount, ...rest } = dto;
+    const {
+      agreement,
+      workOrder,
+      contractAmount,
+      finalEvaluatedAmount,
+      ...rest
+    } = dto;
     const isStatusUpdate = dto.status !== undefined;
     const nextStatus = dto.status;
     const resolvedActualCompletionDate =
       nextStatus === ContractStatus.COMPLETED
-        ? dto.actualCompletionDate ??
+        ? (dto.actualCompletionDate ??
           existingContract.actualCompletionDate ??
-          new Date()
+          new Date())
         : dto.actualCompletionDate;
     const shouldGenerateCompletionCode =
       nextStatus === ContractStatus.COMPLETED &&
       existingContract.completionCode == null;
+    const updatedProjectFiscalYear =
+      rest.projectId && rest.projectId !== existingContract.projectId
+        ? await this.getProjectFiscalYear(rest.projectId)
+        : undefined;
+    const effectiveFiscalYear =
+      updatedProjectFiscalYear ??
+      normalizeFiscalYear(existingContract.fiscalYear) ??
+      existingContract.fiscalYear ??
+      existingContract.project?.fiscalYear;
 
     if (isStatusUpdate && nextStatus) {
-      requireAdminUser(user, 'Only admins can change contract milestone status');
+      requireAdminUser(
+        user,
+        'Only admins can change contract milestone status',
+      );
 
       if (existingContract.approvalStatus !== ApprovalStatus.APPROVED) {
         throw new BadRequestException(
@@ -551,7 +597,7 @@ export class ContractService {
         const completionCode = shouldGenerateCompletionCode
           ? await this.getNextCompletionCode(
               resolvedActualCompletionDate ?? new Date(),
-              existingContract.project?.fiscalYear,
+              effectiveFiscalYear,
             )
           : undefined;
 
@@ -566,26 +612,28 @@ export class ContractService {
             ),
             actualCompletionDate: resolvedActualCompletionDate,
             completionCode,
-            contractAmount: contractAmount != null
-              ? new Prisma.Decimal(contractAmount)
-              : undefined,
-            finalEvaluatedAmount: this.getFinalEvaluatedAmountPatch(
-              finalEvaluatedAmount,
-            ),
+            fiscalYear: updatedProjectFiscalYear,
+            contractAmount:
+              contractAmount != null
+                ? new Prisma.Decimal(contractAmount)
+                : undefined,
+            finalEvaluatedAmount:
+              this.getFinalEvaluatedAmountPatch(finalEvaluatedAmount),
             agreement: agreement
               ? {
                   upsert: {
                     create: {
                       ...agreement,
-                      content:       agreement.content       ?? '',
+                      content: agreement.content ?? '',
                       agreementDate: agreement.agreementDate ?? new Date(),
-                      amount:        new Prisma.Decimal(agreement.amount ?? 0),
+                      amount: new Prisma.Decimal(agreement.amount ?? 0),
                     },
                     update: {
                       ...agreement,
-                      amount: agreement.amount != null
-                        ? new Prisma.Decimal(agreement.amount)
-                        : undefined,
+                      amount:
+                        agreement.amount != null
+                          ? new Prisma.Decimal(agreement.amount)
+                          : undefined,
                     },
                   },
                 }
@@ -595,8 +643,9 @@ export class ContractService {
                   upsert: {
                     create: {
                       ...workOrder,
-                      content:            workOrder.content            ?? '',
-                      workCompletionDate: workOrder.workCompletionDate ?? new Date(),
+                      content: workOrder.content ?? '',
+                      workCompletionDate:
+                        workOrder.workCompletionDate ?? new Date(),
                     },
                     update: workOrder,
                   },
@@ -629,6 +678,7 @@ export class ContractService {
       select: {
         id: true,
         projectId: true,
+        fiscalYear: true,
         startDate: true,
         status: true,
         approvalStatus: true,
@@ -660,14 +710,17 @@ export class ContractService {
       );
     }
 
-    const shouldGenerateCompletionCode = existingContract.completionCode == null;
+    const shouldGenerateCompletionCode =
+      existingContract.completionCode == null;
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const completionCode = shouldGenerateCompletionCode
           ? await this.getNextCompletionCode(
               actualCompletionDate,
-              existingContract.project?.fiscalYear,
+              normalizeFiscalYear(existingContract.fiscalYear) ??
+                existingContract.fiscalYear ??
+                existingContract.project?.fiscalYear,
             )
           : undefined;
 
@@ -681,7 +734,7 @@ export class ContractService {
             approvalStatus: existingContract.approvalStatus,
             approvedAt:
               existingContract.approvalStatus === ApprovalStatus.APPROVED
-                ? existingContract.approvedAt ?? new Date()
+                ? (existingContract.approvedAt ?? new Date())
                 : existingContract.approvedAt,
           },
           include: CONTRACT_INCLUDE,

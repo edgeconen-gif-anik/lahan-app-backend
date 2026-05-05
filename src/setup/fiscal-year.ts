@@ -1,10 +1,17 @@
-const FISCAL_YEAR_PATTERN = /^(\d{4})\s*[/-]\s*(\d{2,3})$/;
+const FISCAL_YEAR_PATTERN = /^(\d{2,4})\s*[/-]\s*(\d{2,4})$/;
+const NEPALI_FISCAL_YEAR_START_MONTH = 7;
+const NEPALI_FISCAL_YEAR_START_DAY = 16;
 
 export function getCurrentNepaliFiscalYear(referenceDate = new Date()) {
   const month = referenceDate.getMonth() + 1;
+  const day = referenceDate.getDate();
   const adYear = referenceDate.getFullYear();
-  const fiscalStartAdYear = month >= 7 ? adYear : adYear - 1;
-  const bsStartYear = fiscalStartAdYear + (month >= 4 ? 57 : 56);
+  const hasNewFiscalYearStarted =
+    month > NEPALI_FISCAL_YEAR_START_MONTH ||
+    (month === NEPALI_FISCAL_YEAR_START_MONTH &&
+      day >= NEPALI_FISCAL_YEAR_START_DAY);
+  const fiscalStartAdYear = hasNewFiscalYearStarted ? adYear : adYear - 1;
+  const bsStartYear = fiscalStartAdYear + 57;
   const bsEndYear = bsStartYear + 1;
 
   return `${bsStartYear}/${String(bsEndYear).slice(-3)}`;
@@ -16,8 +23,16 @@ export function normalizeFiscalYear(value?: string | null) {
     return null;
   }
 
-  const [, startYear, endYear] = match;
-  return `${startYear}/${endYear.padStart(3, '0')}`;
+  const [, startYearRaw, endYearRaw] = match;
+  const startYear =
+    startYearRaw.length === 4
+      ? startYearRaw
+      : startYearRaw.length === 3
+        ? `2${startYearRaw}`
+        : `20${startYearRaw}`;
+  const endYear = endYearRaw.slice(-3).padStart(3, '0');
+
+  return `${startYear}/${endYear}`;
 }
 
 export function getFiscalYearVariants(value?: string | null) {
@@ -29,6 +44,7 @@ export function getFiscalYearVariants(value?: string | null) {
 
   const [startYear, endYearThreeDigit] = normalized.split('/');
   const endYearTwoDigit = endYearThreeDigit.slice(-2);
+  const startYearTwoDigit = startYear.slice(-2);
 
   return Array.from(
     new Set([
@@ -36,6 +52,10 @@ export function getFiscalYearVariants(value?: string | null) {
       `${startYear}/${endYearTwoDigit}`,
       `${startYear}-${endYearThreeDigit}`,
       `${startYear}-${endYearTwoDigit}`,
+      `${startYearTwoDigit}/${endYearThreeDigit}`,
+      `${startYearTwoDigit}/${endYearTwoDigit}`,
+      `${startYearTwoDigit}-${endYearThreeDigit}`,
+      `${startYearTwoDigit}-${endYearTwoDigit}`,
     ]),
   );
 }

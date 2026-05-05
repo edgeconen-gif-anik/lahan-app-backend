@@ -20,10 +20,20 @@ import {
   getFiscalYearVariants,
   normalizeFiscalYear,
 } from '../setup/fiscal-year';
+import { SetupService } from '../setup/setup.service';
 
 @Injectable()
 export class UserCommitteeService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly setupService: SetupService,
+  ) {}
+
+  private async resolveFiscalYear(value?: string | null) {
+    const rawFiscalYear =
+      value?.trim() || (await this.setupService.getCurrentFiscalYear());
+    return normalizeFiscalYear(rawFiscalYear) ?? rawFiscalYear;
+  }
 
   private validateLeadershipRoles(
     officials?: {
@@ -67,7 +77,7 @@ export class UserCommitteeService {
 
   async create(dto: CreateUserCommitteeDto, user: AuthUser) {
     const { officials, formedDate, ...rest } = dto;
-    const fiscalYear = normalizeFiscalYear(rest.fiscalYear) ?? rest.fiscalYear;
+    const fiscalYear = await this.resolveFiscalYear(rest.fiscalYear);
 
     this.validateLeadershipRoles(officials);
 
@@ -155,9 +165,7 @@ export class UserCommitteeService {
     });
 
     if (!committee) {
-      throw new NotFoundException(
-        `User Committee with ID ${id} not found`,
-      );
+      throw new NotFoundException(`User Committee with ID ${id} not found`);
     }
 
     return committee;
@@ -168,9 +176,9 @@ export class UserCommitteeService {
 
     const { officials, formedDate, ...rest } = dto;
     const fiscalYear =
-      rest.fiscalYear == null
+      rest.fiscalYear === undefined
         ? undefined
-        : normalizeFiscalYear(rest.fiscalYear) ?? rest.fiscalYear;
+        : await this.resolveFiscalYear(rest.fiscalYear);
 
     if (officials) {
       this.validateLeadershipRoles(officials);

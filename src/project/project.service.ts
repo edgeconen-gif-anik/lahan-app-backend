@@ -13,15 +13,26 @@ import {
 } from '@prisma/client';
 import * as Papa from 'papaparse';
 
-import { CreateProjectSchema, CreateProjectDto } from './dto/create-project.dto';
-import { UpdateProjectSchema, UpdateProjectDto } from './dto/update-project.dto';
+import {
+  CreateProjectSchema,
+  CreateProjectDto,
+} from './dto/create-project.dto';
+import {
+  UpdateProjectSchema,
+  UpdateProjectDto,
+} from './dto/update-project.dto';
 import { QueryProjectSchema, QueryProjectDto } from './dto/query-project.dto';
 import { ImportProjectRowSchema } from './dto/import-project.dto';
-import { AuthUser, getApprovalVisibilityWhere, isAdminUser } from '../auth/auth-user';
+import {
+  AuthUser,
+  getApprovalVisibilityWhere,
+  isAdminUser,
+} from '../auth/auth-user';
 import {
   getFiscalYearVariants,
   normalizeFiscalYear,
 } from '../setup/fiscal-year';
+import { SetupService } from '../setup/setup.service';
 
 function mapProject(project: Project) {
   return {
@@ -111,10 +122,9 @@ function getProjectInclude(user: AuthUser) {
   } satisfies Prisma.ProjectInclude;
 }
 
-function sanitizeApprovalRelation<T extends { approvalStatus?: ApprovalStatus | null }>(
-  relation: T | null | undefined,
-  user: AuthUser,
-) {
+function sanitizeApprovalRelation<
+  T extends { approvalStatus?: ApprovalStatus | null },
+>(relation: T | null | undefined, user: AuthUser) {
   if (relation === undefined) {
     return undefined;
   }
@@ -123,7 +133,10 @@ function sanitizeApprovalRelation<T extends { approvalStatus?: ApprovalStatus | 
     return null;
   }
 
-  if (isAdminUser(user) || relation.approvalStatus === ApprovalStatus.APPROVED) {
+  if (
+    isAdminUser(user) ||
+    relation.approvalStatus === ApprovalStatus.APPROVED
+  ) {
     const { approvalStatus, ...visibleRelation } = relation;
     return visibleRelation;
   }
@@ -141,11 +154,20 @@ function sanitizeProjectVisibility(project: any, user: AuthUser) {
 
 @Injectable()
 export class ProjectService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly setupService: SetupService,
+  ) {}
+
+  private async resolveFiscalYear(value?: string | null) {
+    const rawFiscalYear =
+      value?.trim() || (await this.setupService.getCurrentFiscalYear());
+    return normalizeFiscalYear(rawFiscalYear) ?? rawFiscalYear;
+  }
 
   async create(dto: CreateProjectDto) {
     const data = CreateProjectSchema.parse(dto);
-    const fiscalYear = normalizeFiscalYear(data.fiscalYear) ?? data.fiscalYear;
+    const fiscalYear = await this.resolveFiscalYear(data.fiscalYear);
 
     const duplicate = await this.prisma.project.findFirst({
       where: {
@@ -183,7 +205,9 @@ export class ProjectService {
 
     const where: Prisma.ProjectWhereInput = {
       ...(q.status && { status: q.status }),
-      ...(fiscalYearVariants.length && { fiscalYear: { in: fiscalYearVariants } }),
+      ...(fiscalYearVariants.length && {
+        fiscalYear: { in: fiscalYearVariants },
+      }),
       ...(q.search && {
         OR: [
           { sNo: { contains: q.search, mode: 'insensitive' } },
@@ -202,16 +226,20 @@ export class ProjectService {
           SELECT * FROM "Project"
           WHERE 1=1
           ${q.status ? Prisma.sql`AND "status" = ${q.status}` : Prisma.sql``}
-          ${fiscalYearVariants.length
-            ? Prisma.sql`AND "fiscalYear" IN (${Prisma.join(fiscalYearVariants)})`
-            : Prisma.sql``}
-          ${q.search
-            ? Prisma.sql`AND (
+          ${
+            fiscalYearVariants.length
+              ? Prisma.sql`AND "fiscalYear" IN (${Prisma.join(fiscalYearVariants)})`
+              : Prisma.sql``
+          }
+          ${
+            q.search
+              ? Prisma.sql`AND (
                 "sNo" ILIKE ${'%' + q.search + '%'} OR
                 "name" ILIKE ${'%' + q.search + '%'} OR
                 "budgetCode" ILIKE ${'%' + q.search + '%'}
               )`
-            : Prisma.sql``}
+              : Prisma.sql``
+          }
           ORDER BY NULLIF(regexp_replace("sNo", '[^0-9]', '', 'g'), '')::INTEGER ${direction} NULLS LAST
           LIMIT ${q.limit} OFFSET ${skip}
         `),
@@ -261,9 +289,9 @@ export class ProjectService {
   async update(id: string, dto: UpdateProjectDto) {
     const data = UpdateProjectSchema.parse(dto);
     const fiscalYear =
-      data.fiscalYear == null
+      data.fiscalYear === undefined
         ? undefined
-        : normalizeFiscalYear(data.fiscalYear) ?? data.fiscalYear;
+        : await this.resolveFiscalYear(data.fiscalYear);
 
     try {
       const payload: Prisma.ProjectUncheckedUpdateInput = {
@@ -312,6 +340,7 @@ export class ProjectService {
 
   async importCsv(file: Express.Multer.File) {
     if (!file) throw new BadRequestException('CSV file required');
+    const defaultFiscalYear = await this.resolveFiscalYear();
 
     let csvString = file.buffer.toString('utf8');
     csvString = csvString.replace(/^\uFEFF/, '');
@@ -329,11 +358,14 @@ export class ProjectService {
       ...new Set(
         (parsed.data as any[])
           .map((r: any) => normalizeFiscalYear(r.fiscalYear) ?? r.fiscalYear)
+          .map((year: string | undefined) => year?.trim() || defaultFiscalYear)
           .filter(Boolean),
       ),
     ];
     const fiscalYearLookupValues = [
-      ...new Set(fiscalYearsInCsv.flatMap((year) => getFiscalYearVariants(year))),
+      ...new Set(
+        fiscalYearsInCsv.flatMap((year) => getFiscalYearVariants(year)),
+      ),
     ];
 
     const existingProjects = await this.prisma.project.findMany({
@@ -345,7 +377,9 @@ export class ProjectService {
     });
 
     const existingSNoSet = new Set(
-      existingProjects.map((p) => `${normalizeFiscalYear(p.fiscalYear) ?? p.fiscalYear}:${p.sNo}`),
+      existingProjects.map(
+        (p) => `${normalizeFiscalYear(p.fiscalYear) ?? p.fiscalYear}:${p.sNo}`,
+      ),
     );
 
     (parsed.data as any[]).forEach((row: any, index: number) => {
@@ -358,9 +392,16 @@ export class ProjectService {
 
       const r = result.data;
       const sNoStr = r.sNo ? String(r.sNo).trim() : null;
-      const fiscalYear = normalizeFiscalYear(r.fiscalYear) ?? r.fiscalYear;
+      const fiscalYear =
+        normalizeFiscalYear(r.fiscalYear) ||
+        r.fiscalYear?.trim() ||
+        defaultFiscalYear;
 
-      if (sNoStr && fiscalYear && existingSNoSet.has(`${fiscalYear}:${sNoStr}`)) {
+      if (
+        sNoStr &&
+        fiscalYear &&
+        existingSNoSet.has(`${fiscalYear}:${sNoStr}`)
+      ) {
         skippedDuplicates++;
         return;
       }
