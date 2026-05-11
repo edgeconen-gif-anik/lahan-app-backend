@@ -27,6 +27,7 @@ import {
   AuthUser,
   getApprovalVisibilityWhere,
   isAdminUser,
+  requireAdminUser,
 } from '../auth/auth-user';
 import {
   getFiscalYearVariants,
@@ -47,6 +48,7 @@ function mapProject(project: Project) {
 function mapImplantedThrough(
   val: string | null | undefined,
 ): ProjectImplantedThrough | null | undefined {
+  if (val === null) return null;
   if (!val) return undefined;
   if (val === 'COMPANY') return ProjectImplantedThrough.COMP;
   if (val === 'USER_COMMITTEE') return ProjectImplantedThrough.USER_COMMITTEE;
@@ -165,9 +167,12 @@ export class ProjectService {
     return normalizeFiscalYear(rawFiscalYear) ?? rawFiscalYear;
   }
 
-  async create(dto: CreateProjectDto) {
+  async create(dto: CreateProjectDto, user: AuthUser) {
+    requireAdminUser(user);
+
     const data = CreateProjectSchema.parse(dto);
     const fiscalYear = await this.resolveFiscalYear(data.fiscalYear);
+    const implantedThrough = mapImplantedThrough(data.implantedThrough);
 
     const duplicate = await this.prisma.project.findFirst({
       where: {
@@ -187,7 +192,15 @@ export class ProjectService {
     const payload: Prisma.ProjectUncheckedCreateInput = {
       ...data,
       fiscalYear,
-      implantedThrough: mapImplantedThrough(data.implantedThrough),
+      implantedThrough,
+      companyId:
+        implantedThrough === ProjectImplantedThrough.COMP
+          ? data.companyId
+          : null,
+      userCommitteeId:
+        implantedThrough === ProjectImplantedThrough.USER_COMMITTEE
+          ? data.userCommitteeId
+          : null,
       allocatedBudget: safeDecimal(data.allocatedBudget),
       internalBudget: safeDecimal(data.internalBudget),
       centralBudget: safeDecimal(data.centralBudget),
@@ -286,20 +299,33 @@ export class ProjectService {
     return sanitizeProjectVisibility(mapProject(project), user);
   }
 
-  async update(id: string, dto: UpdateProjectDto) {
+  async update(id: string, dto: UpdateProjectDto, user: AuthUser) {
+    requireAdminUser(user);
+
     const data = UpdateProjectSchema.parse(dto);
     const fiscalYear =
       data.fiscalYear === undefined
         ? undefined
         : await this.resolveFiscalYear(data.fiscalYear);
+    const shouldUpdateImplementation = data.implantedThrough !== undefined;
+    const implantedThrough = shouldUpdateImplementation
+      ? mapImplantedThrough(data.implantedThrough)
+      : undefined;
+    const implementationRelations: Prisma.ProjectUncheckedUpdateInput =
+      !shouldUpdateImplementation
+        ? {}
+        : implantedThrough === ProjectImplantedThrough.COMP
+          ? { companyId: data.companyId ?? null, userCommitteeId: null }
+          : implantedThrough === ProjectImplantedThrough.USER_COMMITTEE
+            ? { companyId: null, userCommitteeId: data.userCommitteeId ?? null }
+            : { companyId: null, userCommitteeId: null };
 
     try {
       const payload: Prisma.ProjectUncheckedUpdateInput = {
         ...data,
         fiscalYear,
-        implantedThrough: data.implantedThrough
-          ? mapImplantedThrough(data.implantedThrough)
-          : undefined,
+        implantedThrough,
+        ...implementationRelations,
         allocatedBudget:
           data.allocatedBudget !== undefined
             ? safeDecimal(data.allocatedBudget)
@@ -324,12 +350,23 @@ export class ProjectService {
       });
 
       return mapProject(project);
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          'A project with the same name, type, budget code, and fiscal year already exists.',
+        );
+      }
+
       throw new NotFoundException('Project not found or update failed');
     }
   }
 
-  async remove(id: string) {
+  async remove(id: string, user: AuthUser) {
+    requireAdminUser(user);
+
     try {
       await this.prisma.project.delete({ where: { id } });
       return { success: true };
@@ -338,7 +375,9 @@ export class ProjectService {
     }
   }
 
-  async importCsv(file: Express.Multer.File) {
+  async importCsv(file: Express.Multer.File, user: AuthUser) {
+    requireAdminUser(user);
+
     if (!file) throw new BadRequestException('CSV file required');
     const defaultFiscalYear = await this.resolveFiscalYear();
 

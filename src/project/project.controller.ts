@@ -23,8 +23,8 @@ export class ProjectController {
   constructor(private readonly projectService: ProjectService) {}
 
   @Post()
-  create(@Body() body: any) {
-    return this.projectService.create(body);
+  create(@Body() body: any, @Request() req) {
+    return this.projectService.create(body, req.user);
   }
 
   @Get()
@@ -38,18 +38,18 @@ export class ProjectController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: any) {
-    return this.projectService.update(id, body);
+  update(@Param('id') id: string, @Body() body: any, @Request() req) {
+    return this.projectService.update(id, body, req.user);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.projectService.remove(id);
+  remove(@Param('id') id: string, @Request() req) {
+    return this.projectService.remove(id, req.user);
   }
 
   @Post('import/csv')
   @UseInterceptors(FileInterceptor('file'))
-  importCsv(@UploadedFile() file: Express.Multer.File) {
-    return this.projectService.importCsv(file);
+  importCsv(@UploadedFile() file: Express.Multer.File, @Request() req) {
+    return this.projectService.importCsv(file, req.user);
   }
 }

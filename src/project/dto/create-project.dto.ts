@@ -1,14 +1,34 @@
 import { z } from 'zod';
 
+const optionalText = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+  z.string().trim().nullable().optional(),
+);
+
+const optionalUuid = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+  z.string().uuid().nullable().optional(),
+);
+
+const optionalFiscalYear = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().optional(),
+);
+
+const optionalImplantedThrough = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+  z.enum(['COMP', 'COMPANY', 'USER_COMMITTEE']).nullable().optional(),
+);
+
 export const CreateProjectSchema = z.object({
+  sNo: optionalText,
   name: z.string().min(1),
   type: z.string().min(1),
   budgetCode: z.string().min(1),
-  fiscalYear: z.string().optional(),
+  fiscalYear: optionalFiscalYear,
   source: z.string().min(1),
 
-  // --- ADD THIS FIELD ---
-  implantedThrough: z.enum(['COMPANY', 'USER_COMMITTEE']).optional(),
+  implantedThrough: optionalImplantedThrough,
 
   allocatedBudget: z
     .union([z.string(), z.number()])
@@ -31,10 +51,10 @@ export const CreateProjectSchema = z.object({
     .optional(),
 
   // Optional relations
-  companyId: z.string().uuid().optional(),
-  userCommitteeId: z.string().uuid().optional(),
-  projectManagerId: z.string().uuid().optional(),
-  siteInchargeId: z.string().uuid().optional(),
+  companyId: optionalUuid,
+  userCommitteeId: optionalUuid,
+  projectManagerId: optionalUuid,
+  siteInchargeId: optionalUuid,
 });
 
 export type CreateProjectDto = z.infer<typeof CreateProjectSchema>;

@@ -12,6 +12,7 @@ export const ProjectStatusEnum = z.enum([
 ]);
 
 export const ProjectImplantedThroughEnum = z.enum([
+  'COMP',
   'COMPANY',
   'USER_COMMITTEE',
 ]);
