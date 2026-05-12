@@ -3,7 +3,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { ApprovalStatus, ContractStatus, Role } from '@prisma/client';
+import { ApprovalStatus, ContractStatus, Prisma, Role } from '@prisma/client';
 import { ContractService } from './contract.service';
 
 describe('ContractService', () => {
@@ -359,5 +359,166 @@ describe('ContractService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
 
     expect(prisma.contract.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects final evaluated amount correction on completed contracts from non-admin users', async () => {
+    prisma.contract.findFirst.mockResolvedValue({
+      id: 'contract-1',
+      projectId: 'project-1',
+      status: ContractStatus.COMPLETED,
+      startDate: new Date('2026-04-01T00:00:00.000Z'),
+      actualCompletionDate: new Date('2026-04-20T00:00:00.000Z'),
+      finalEvaluatedAmount: new Prisma.Decimal(450000),
+      approvalStatus: ApprovalStatus.APPROVED,
+      approvedAt: new Date('2026-03-01T10:00:00.000Z'),
+      siteInchargeId: 'user-1',
+      userID: null,
+      completionCode: 'CCR-2082-83-0001',
+      agreement: { id: 'agreement-1' },
+      workOrder: { id: 'work-order-1' },
+    });
+
+    await expect(
+      service.update(
+        'contract-1',
+        { finalEvaluatedAmount: 455000 } as any,
+        {
+          id: 'user-1',
+          email: 'user@example.com',
+          role: Role.CREATOR,
+        },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.contract.update).not.toHaveBeenCalled();
+  });
+
+  it('lets admins correct the final evaluated amount on completed contracts', async () => {
+    const approvedAt = new Date('2026-03-01T10:00:00.000Z');
+    prisma.contract.findFirst.mockResolvedValue({
+      id: 'contract-1',
+      projectId: 'project-1',
+      fiscalYear: '2082/083',
+      status: ContractStatus.COMPLETED,
+      startDate: new Date('2026-04-01T00:00:00.000Z'),
+      actualCompletionDate: new Date('2026-04-20T00:00:00.000Z'),
+      finalEvaluatedAmount: new Prisma.Decimal(450000),
+      approvalStatus: ApprovalStatus.APPROVED,
+      approvedAt,
+      siteInchargeId: 'user-1',
+      userID: null,
+      completionCode: 'CCR-2082-83-0001',
+      project: { fiscalYear: '2082/083' },
+      agreement: { id: 'agreement-1' },
+      workOrder: { id: 'work-order-1' },
+    });
+    prisma.contract.update.mockResolvedValue({
+      id: 'contract-1',
+      status: ContractStatus.COMPLETED,
+      finalEvaluatedAmount: new Prisma.Decimal(455000),
+    });
+
+    await service.update(
+      'contract-1',
+      { finalEvaluatedAmount: 455000 } as any,
+      {
+        id: 'admin-1',
+        email: 'admin@example.com',
+        role: Role.ADMIN,
+      },
+    );
+
+    expect(prisma.contract.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'contract-1' },
+        data: expect.objectContaining({
+          approvalStatus: ApprovalStatus.APPROVED,
+          approvedAt,
+          finalEvaluatedAmount: expect.any(Prisma.Decimal),
+        }),
+      }),
+    );
+  });
+
+  it('rejects project-update corrections on completed contracts from non-admin users', async () => {
+    prisma.contract.findFirst.mockResolvedValue({
+      id: 'contract-1',
+      projectId: 'project-1',
+      fiscalYear: '2082/083',
+      startDate: new Date('2026-04-01T00:00:00.000Z'),
+      status: ContractStatus.COMPLETED,
+      approvalStatus: ApprovalStatus.APPROVED,
+      approvedAt: new Date('2026-03-01T10:00:00.000Z'),
+      siteInchargeId: 'user-1',
+      userID: null,
+      completionCode: 'CCR-2082-83-0001',
+      project: { fiscalYear: '2082/083' },
+    });
+
+    await expect(
+      service.applyProjectUpdate(
+        'contract-1',
+        {
+          finalEvaluatedAmount: 455000,
+          actualCompletionDate: new Date('2026-04-20T00:00:00.000Z'),
+        } as any,
+        {
+          id: 'user-1',
+          email: 'user@example.com',
+          role: Role.CREATOR,
+        },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.contract.update).not.toHaveBeenCalled();
+  });
+
+  it('lets admins correct completed contracts through project update without changing the completion code', async () => {
+    const actualCompletionDate = new Date('2026-04-20T00:00:00.000Z');
+    prisma.contract.findFirst.mockResolvedValue({
+      id: 'contract-1',
+      projectId: 'project-1',
+      fiscalYear: '2082/083',
+      startDate: new Date('2026-04-01T00:00:00.000Z'),
+      status: ContractStatus.COMPLETED,
+      approvalStatus: ApprovalStatus.APPROVED,
+      approvedAt: new Date('2026-03-01T10:00:00.000Z'),
+      siteInchargeId: 'user-1',
+      userID: null,
+      completionCode: 'CCR-2082-83-0001',
+      project: { fiscalYear: '2082/083' },
+    });
+    prisma.contract.update.mockResolvedValue({
+      id: 'contract-1',
+      status: ContractStatus.COMPLETED,
+      completionCode: 'CCR-2082-83-0001',
+      finalEvaluatedAmount: new Prisma.Decimal(455000),
+    });
+
+    await service.applyProjectUpdate(
+      'contract-1',
+      {
+        finalEvaluatedAmount: 455000,
+        actualCompletionDate,
+      } as any,
+      {
+        id: 'admin-1',
+        email: 'admin@example.com',
+        role: Role.ADMIN,
+      },
+    );
+
+    expect(prisma.contract.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'contract-1' },
+        data: expect.objectContaining({
+          status: ContractStatus.COMPLETED,
+          actualCompletionDate,
+          completionCode: undefined,
+          finalEvaluatedAmount: expect.any(Prisma.Decimal),
+        }),
+      }),
+    );
+    expect(prisma.contract.count).not.toHaveBeenCalled();
   });
 });

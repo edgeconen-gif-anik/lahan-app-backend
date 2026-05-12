@@ -548,6 +548,7 @@ export class ContractService {
       ...rest
     } = dto;
     const isStatusUpdate = dto.status !== undefined;
+    const isFinalEvaluatedAmountUpdate = finalEvaluatedAmount !== undefined;
     const nextStatus = dto.status;
     const resolvedActualCompletionDate =
       nextStatus === ContractStatus.COMPLETED
@@ -590,6 +591,16 @@ export class ContractService {
           existingContract.finalEvaluatedAmount != null ||
           dto.finalEvaluatedAmount != null,
       });
+    }
+
+    if (
+      existingContract.status === ContractStatus.COMPLETED &&
+      isFinalEvaluatedAmountUpdate
+    ) {
+      requireAdminUser(
+        user,
+        'Only admins can correct the final evaluated amount after completion',
+      );
     }
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -700,7 +711,14 @@ export class ContractService {
       throw new BadRequestException('Archived contracts cannot be updated');
     }
 
-    this.ensureProjectUpdateAccess(existingContract, user);
+    if (existingContract.status === ContractStatus.COMPLETED) {
+      requireAdminUser(
+        user,
+        'Only admins can correct the final evaluated amount after completion',
+      );
+    } else {
+      this.ensureProjectUpdateAccess(existingContract, user);
+    }
 
     const actualCompletionDate = dto.actualCompletionDate ?? new Date();
 
