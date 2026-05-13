@@ -113,6 +113,46 @@ describe('ContractService', () => {
     );
   });
 
+  it('lets an admin progress an approved contract using generated document pages', async () => {
+    const approvedAt = new Date('2026-03-01T10:00:00.000Z');
+
+    prisma.contract.findFirst.mockResolvedValue({
+      id: 'contract-1',
+      status: ContractStatus.NOT_STARTED,
+      actualCompletionDate: null,
+      finalEvaluatedAmount: null,
+      approvalStatus: ApprovalStatus.APPROVED,
+      approvedAt,
+      agreement: null,
+      workOrder: null,
+    });
+    prisma.contract.update.mockResolvedValue({
+      id: 'contract-1',
+      status: ContractStatus.WORKINPROGRESS,
+    });
+
+    await service.update(
+      'contract-1',
+      { status: ContractStatus.WORKINPROGRESS } as any,
+      {
+        id: 'admin-1',
+        email: 'admin@example.com',
+        role: Role.ADMIN,
+      },
+    );
+
+    expect(prisma.contract.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'contract-1' },
+        data: expect.objectContaining({
+          status: ContractStatus.WORKINPROGRESS,
+          approvalStatus: ApprovalStatus.APPROVED,
+          approvedAt,
+        }),
+      }),
+    );
+  });
+
   it('rejects milestone updates from non-admin users', async () => {
     prisma.contract.findFirst.mockResolvedValue({
       id: 'contract-1',

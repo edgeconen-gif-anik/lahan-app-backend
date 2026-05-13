@@ -163,16 +163,12 @@ export class ContractService {
   private validateMilestoneChange(input: {
     currentStatus: ContractStatus;
     nextStatus: ContractStatus;
-    hasAgreement: boolean;
-    hasWorkOrder: boolean;
     hasActualCompletionDate: boolean;
     hasFinalEvaluatedAmount: boolean;
   }) {
     const {
       currentStatus,
       nextStatus,
-      hasAgreement,
-      hasWorkOrder,
       hasActualCompletionDate,
       hasFinalEvaluatedAmount,
     } = input;
@@ -200,24 +196,6 @@ export class ContractService {
 
     if (nextIndex < currentIndex) {
       throw new BadRequestException('Contract milestone cannot move backwards');
-    }
-
-    if (
-      nextIndex >= MILESTONE_ORDER.indexOf(ContractStatus.AGREEMENT) &&
-      !hasAgreement
-    ) {
-      throw new BadRequestException(
-        'Agreement details are required for AGREEMENT milestone or later',
-      );
-    }
-
-    if (
-      nextIndex >= MILESTONE_ORDER.indexOf(ContractStatus.WORKORDER) &&
-      !hasWorkOrder
-    ) {
-      throw new BadRequestException(
-        'Work order details are required for WORKORDER milestone or later',
-      );
     }
 
     if (nextStatus === ContractStatus.COMPLETED && !hasActualCompletionDate) {
@@ -392,8 +370,6 @@ export class ContractService {
       this.validateMilestoneChange({
         currentStatus: ContractStatus.NOT_STARTED,
         nextStatus,
-        hasAgreement: agreement != null,
-        hasWorkOrder: workOrder != null,
         hasActualCompletionDate: actualCompletionDate != null,
         hasFinalEvaluatedAmount: dto.finalEvaluatedAmount != null,
       });
@@ -584,8 +560,6 @@ export class ContractService {
       this.validateMilestoneChange({
         currentStatus: existingContract.status,
         nextStatus,
-        hasAgreement: existingContract.agreement != null || agreement != null,
-        hasWorkOrder: existingContract.workOrder != null || workOrder != null,
         hasActualCompletionDate: resolvedActualCompletionDate != null,
         hasFinalEvaluatedAmount:
           existingContract.finalEvaluatedAmount != null ||
