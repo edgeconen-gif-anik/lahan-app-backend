@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -35,7 +36,7 @@ describe('ContractService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
   });
 
   it('should be defined', () => {
@@ -233,7 +234,35 @@ describe('ContractService', () => {
     expect(prisma.contract.create).not.toHaveBeenCalled();
   });
 
+  it('rejects creating a second contract for the same project', async () => {
+    prisma.contract.findFirst.mockResolvedValue({
+      id: 'contract-existing',
+      contractNumber: 'CNT-2082-83-0007',
+    });
+
+    await expect(
+      service.create(
+        {
+          projectId: 'project-1',
+          companyId: 'company-1',
+          contractNumber: 'CNT-2082-83-0026',
+          contractAmount: 750000,
+          startDate: new Date('2026-04-01T00:00:00.000Z'),
+          intendedCompletionDate: new Date('2026-06-01T00:00:00.000Z'),
+        } as any,
+        {
+          id: 'admin-1',
+          email: 'admin@example.com',
+          role: Role.ADMIN,
+        },
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.contract.create).not.toHaveBeenCalled();
+  });
+
   it('lets an admin create a contract at an allowed milestone when the supporting data is present', async () => {
+    prisma.contract.findFirst.mockResolvedValue(null);
     prisma.contract.create.mockResolvedValue({
       id: 'contract-2',
       status: ContractStatus.AGREEMENT,
@@ -265,6 +294,42 @@ describe('ContractService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           status: ContractStatus.AGREEMENT,
+          initiatedById: 'admin-1',
+        }),
+      }),
+    );
+  });
+
+  it('records the non-admin user who submitted a contract for approval', async () => {
+    prisma.contract.findFirst.mockResolvedValue(null);
+    prisma.contract.create.mockResolvedValue({
+      id: 'contract-3',
+      status: ContractStatus.NOT_STARTED,
+      approvalStatus: ApprovalStatus.PENDING,
+    });
+
+    await service.create(
+      {
+        projectId: 'project-1',
+        companyId: 'company-1',
+        contractNumber: 'CNT-2082-83-0003',
+        contractAmount: 750000,
+        startDate: new Date('2026-04-01T00:00:00.000Z'),
+        intendedCompletionDate: new Date('2026-06-01T00:00:00.000Z'),
+      } as any,
+      {
+        id: 'user-1',
+        email: 'user@example.com',
+        role: Role.CREATOR,
+      },
+    );
+
+    expect(prisma.contract.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          approvalStatus: ApprovalStatus.PENDING,
+          approvedAt: null,
+          initiatedById: 'user-1',
         }),
       }),
     );
@@ -292,6 +357,43 @@ describe('ContractService', () => {
         },
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.contract.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects moving an existing contract onto a project that already has a contract', async () => {
+    prisma.contract.findFirst
+      .mockResolvedValueOnce({
+        id: 'contract-1',
+        projectId: 'project-1',
+        fiscalYear: '2082/083',
+        status: ContractStatus.NOT_STARTED,
+        startDate: new Date('2026-04-01T00:00:00.000Z'),
+        actualCompletionDate: null,
+        finalEvaluatedAmount: null,
+        approvalStatus: ApprovalStatus.APPROVED,
+        approvedAt: new Date('2026-03-01T10:00:00.000Z'),
+        initiatedById: null,
+        project: { fiscalYear: '2082/083' },
+        agreement: null,
+        workOrder: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'contract-2',
+        contractNumber: 'CNT-2082-83-0007',
+      });
+
+    await expect(
+      service.update(
+        'contract-1',
+        { projectId: 'project-2' } as any,
+        {
+          id: 'admin-1',
+          email: 'admin@example.com',
+          role: Role.ADMIN,
+        },
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
 
     expect(prisma.contract.update).not.toHaveBeenCalled();
   });

@@ -54,6 +54,9 @@ const CONTRACT_INCLUDE = {
   company: { select: { id: true, name: true, panNumber: true } },
   userCommittee: { select: { id: true, name: true } },
   user: { select: { id: true, name: true, designation: true } },
+  initiatedBy: {
+    select: { id: true, name: true, email: true, designation: true },
+  },
   agreement: true,
   workOrder: true,
 } satisfies Prisma.ContractInclude;
@@ -264,6 +267,28 @@ export class ContractService {
     return normalizeFiscalYear(project.fiscalYear) ?? project.fiscalYear;
   }
 
+  private async ensureProjectHasNoOtherContract(
+    projectId: string,
+    excludeContractId?: string,
+  ) {
+    const duplicate = await this.prisma.contract.findFirst({
+      where: {
+        projectId,
+        ...(excludeContractId ? { id: { not: excludeContractId } } : {}),
+      },
+      select: {
+        id: true,
+        contractNumber: true,
+      },
+    });
+
+    if (duplicate) {
+      throw new ConflictException(
+        `Project already has contract ${duplicate.contractNumber}. Use that contract instead of creating a duplicate.`,
+      );
+    }
+  }
+
   private async getNextCompletionCode(
     referenceDate: Date,
     fiscalYear?: string | null,
@@ -375,7 +400,10 @@ export class ContractService {
       });
     }
 
-    const projectFiscalYear = await this.getProjectFiscalYear(rest.projectId);
+    const [projectFiscalYear] = await Promise.all([
+      this.getProjectFiscalYear(rest.projectId),
+      this.ensureProjectHasNoOtherContract(rest.projectId),
+    ]);
     const completionCode =
       nextStatus === ContractStatus.COMPLETED
         ? await this.getNextCompletionCode(
@@ -390,6 +418,7 @@ export class ContractService {
           ...rest,
           fiscalYear: projectFiscalYear,
           ...getApprovalStateForSave(user),
+          initiatedById: user.id,
           actualCompletionDate,
           completionCode,
           contractAmount: new Prisma.Decimal(contractAmount),
@@ -414,6 +443,12 @@ export class ContractService {
       ) {
         if (this.isUniqueConstraintErrorForField(error, 'contractNumber')) {
           throw new ConflictException('Contract number already exists');
+        }
+
+        if (this.isUniqueConstraintErrorForField(error, 'projectId')) {
+          throw new ConflictException(
+            'Project already has a contract. Use the existing contract instead of creating a duplicate.',
+          );
         }
 
         if (this.isUniqueConstraintErrorForField(error, 'completionCode')) {
@@ -500,6 +535,7 @@ export class ContractService {
         finalEvaluatedAmount: true,
         approvalStatus: true,
         approvedAt: true,
+        initiatedById: true,
         project: {
           select: { fiscalYear: true },
         },
@@ -577,6 +613,10 @@ export class ContractService {
       );
     }
 
+    if (rest.projectId && rest.projectId !== existingContract.projectId) {
+      await this.ensureProjectHasNoOtherContract(rest.projectId, id);
+    }
+
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const completionCode = shouldGenerateCompletionCode
@@ -595,6 +635,9 @@ export class ContractService {
               user,
               isStatusUpdate,
             ),
+            initiatedById: isAdminUser(user)
+              ? existingContract.initiatedById
+              : user.id,
             actualCompletionDate: resolvedActualCompletionDate,
             completionCode,
             fiscalYear: updatedProjectFiscalYear,

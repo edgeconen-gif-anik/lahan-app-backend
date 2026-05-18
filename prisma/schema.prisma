@@ -29,6 +29,8 @@ model User {
   // ✅ NEW: User as site incharge directly on a Contract
   managedContracts Contract[] @relation("ContractSiteIncharge")
 
+  initiatedContracts Contract[] @relation("ContractInitiatedBy")
+
   // managedProjects   Project[]  @relation("ProjectManager")
 }
 
@@ -162,6 +164,7 @@ model Contract {
   companyId              String?
   userID                 String? // committee representative user
   siteInchargeId         String? // ✅ NEW: site incharge for this contract
+  initiatedById          String?
   contractNumber         String         @unique
   fiscalYear             String
   completionCode         String?        @unique
@@ -190,11 +193,14 @@ model Contract {
   // ✅ NEW: site incharge directly on the contract
   siteIncharge User? @relation("ContractSiteIncharge", fields: [siteInchargeId], references: [id])
 
+  initiatedBy User? @relation("ContractInitiatedBy", fields: [initiatedById], references: [id])
+
   @@index([projectId])
   @@index([companyId])
   @@index([userCommitteeId])
   @@index([fiscalYear])
   @@index([siteInchargeId]) // ✅ NEW: for fast filtering by site incharge
+  @@index([initiatedById])
 }
 
 model Agreement {
