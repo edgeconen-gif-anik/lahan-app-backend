@@ -4,7 +4,6 @@ import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { CompanyModule } from './company/company.module';
 import { ProjectModule } from './project/project.module';
-import { PrismaService } from './prisma/prisma.service';
 import { ContractModule } from './contract/contract.module';
 import { UserModule } from './user/user.module';
 import { ConfigModule } from '@nestjs/config';
@@ -19,6 +18,6 @@ import { SetupModule } from './setup/setup.module';
     }),
     PrismaModule, CompanyModule, ProjectModule, ContractModule, UserModule, AuthModule, SetupModule],
   controllers: [AppController, UserCommitteeController],
-  providers: [AppService, PrismaService, UserCommitteeService],
+  providers: [AppService, UserCommitteeService],
 })
 export class AppModule {}

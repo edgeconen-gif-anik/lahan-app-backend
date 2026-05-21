@@ -4,23 +4,29 @@ import { AuthController } from './auth.controller';
 import { UserModule } from '../user/user.module'; // Import UserModule
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { PrismaService } from 'src/prisma/prisma.service';
 import { JwtStrategy } from './strategy/jwt.strategy';
 import { AUTH_ACCESS_TOKEN_MAX_AGE } from './session-config';
 import { MailModule } from '../mail/mail.module';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
   imports: [
     UserModule,
     MailModule,
     PassportModule,
-    JwtModule.register({
-      secret:
-        process.env.JWT_SECRET || process.env.JWT_SECRET_KEY || 'secretKey', // Use a .env var in production!
-      signOptions: { expiresIn: AUTH_ACCESS_TOKEN_MAX_AGE },
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        secret:
+          configService.get<string>('JWT_SECRET') ||
+          configService.get<string>('JWT_SECRET_KEY') ||
+          'secretKey',
+        signOptions: { expiresIn: AUTH_ACCESS_TOKEN_MAX_AGE },
+      }),
     }),
   ],
-  providers: [AuthService, PrismaService, JwtStrategy],
+  providers: [AuthService, JwtStrategy],
   controllers: [AuthController],
   exports: [AuthService],
 })

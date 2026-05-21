@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AuthUser } from '../auth-user';
@@ -15,6 +15,8 @@ type JwtPayload = {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
+  private readonly logger = new Logger(JwtStrategy.name);
+
   constructor(private readonly prisma: PrismaService) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -29,39 +31,48 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Session is invalid');
     }
 
-    const now = new Date();
-    const session = await this.prisma.session.findUnique({
-      where: { sessionToken: payload.sid },
-      select: {
-        sessionToken: true,
-        userId: true,
-        expires: true,
-      },
-    });
-
-    if (!session || session.userId !== payload.sub) {
-      throw new UnauthorizedException('Session is invalid');
-    }
-
-    if (session.expires.getTime() <= now.getTime()) {
-      await this.prisma.session.deleteMany({
+    try {
+      const now = new Date();
+      const session = await this.prisma.session.findUnique({
         where: { sessionToken: payload.sid },
+        select: {
+          sessionToken: true,
+          userId: true,
+          expires: true,
+        },
       });
 
-      throw new UnauthorizedException('Session expired due to inactivity');
+      if (!session || session.userId !== payload.sub) {
+        throw new UnauthorizedException('Session is invalid');
+      }
+
+      if (session.expires.getTime() <= now.getTime()) {
+        await this.prisma.session.deleteMany({
+          where: { sessionToken: payload.sid },
+        });
+
+        throw new UnauthorizedException('Session expired due to inactivity');
+      }
+
+      await this.prisma.session.update({
+        where: { sessionToken: session.sessionToken },
+        data: { expires: getIdleSessionExpiry(now) },
+      });
+
+      return {
+        id: payload.sub,
+        email: payload.email,
+        sessionToken: session.sessionToken,
+        role: payload.role as AuthUser['role'],
+        designation: payload.designation,
+      };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+
+      this.logger.error('Unable to validate session', error);
+      throw new UnauthorizedException('Unable to verify session');
     }
-
-    await this.prisma.session.update({
-      where: { sessionToken: session.sessionToken },
-      data: { expires: getIdleSessionExpiry(now) },
-    });
-
-    return {
-      id: payload.sub,
-      email: payload.email,
-      sessionToken: session.sessionToken,
-      role: payload.role as AuthUser['role'],
-      designation: payload.designation,
-    };
   }
 }
