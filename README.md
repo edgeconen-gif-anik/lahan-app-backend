@@ -31,6 +31,37 @@
 $ npm install
 ```
 
+## Working From Two Computers
+
+This folder is connected to the GitHub repository:
+
+```bash
+https://github.com/edgeconen-gif-anik/lahan-app-backend.git
+```
+
+You can work from both the office PC and the home laptop as long as GitHub is
+the shared source of truth.
+
+Before starting work on either computer:
+
+```bash
+git pull
+npm install
+```
+
+After finishing work on either computer:
+
+```bash
+git status
+git add .
+git commit -m "Describe the change"
+git push
+```
+
+Then, on the other computer, run `git pull` before continuing. Keep each
+computer's real `.env` file local; it is ignored by Git. Use `.env.example` as
+the safe template for required environment variables.
+
 ## Email setup
 
 Password reset email uses SMTP through Nodemailer. For a free setup, copy
