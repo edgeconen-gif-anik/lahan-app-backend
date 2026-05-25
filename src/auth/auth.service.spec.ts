@@ -4,6 +4,7 @@ import { AuthService } from './auth.service';
 describe('AuthService', () => {
   let service: AuthService;
   const originalFrontendUrl = process.env.FRONTEND_URL;
+  const originalNodeEnv = process.env.NODE_ENV;
   const usersService = {
     findByEmail: jest.fn(),
   };
@@ -48,6 +49,12 @@ describe('AuthService', () => {
       delete process.env.FRONTEND_URL;
     } else {
       process.env.FRONTEND_URL = originalFrontendUrl;
+    }
+
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
     }
 
     jest.restoreAllMocks();
@@ -103,6 +110,23 @@ describe('AuthService', () => {
     ).rejects.toThrow('This email is not registered with us.');
 
     expect(prisma.verificationToken.create).not.toHaveBeenCalled();
+  });
+
+  it('reports an unavailable email service in production when sending fails', async () => {
+    process.env.NODE_ENV = 'production';
+    usersService.findByEmail.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+    });
+    prisma.verificationToken.deleteMany.mockResolvedValue({ count: 1 });
+    prisma.verificationToken.create.mockResolvedValue({});
+    mailService.sendPasswordResetEmail.mockRejectedValue(
+      new Error('SMTP authentication failed'),
+    );
+
+    await expect(service.forgotPassword('user@example.com')).rejects.toThrow(
+      'Unable to send password reset email right now. Please try again later.',
+    );
   });
 
   it('resets the password for a valid reset token', async () => {

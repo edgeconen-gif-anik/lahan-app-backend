@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
@@ -259,6 +260,12 @@ export class AuthService {
       this.logger.error(
         `Unable to send password reset email to ${normalizedEmail}`,
         error,
+      );
+    }
+
+    if (!emailSent && process.env.NODE_ENV === 'production') {
+      throw new ServiceUnavailableException(
+        'Unable to send password reset email right now. Please try again later.',
       );
     }
 

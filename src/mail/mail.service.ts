@@ -19,6 +19,13 @@ export class MailService {
     const user = process.env.SMTP_USER;
     const pass = process.env.SMTP_PASS || process.env.SMTP_APP_PASSWORD;
     const port = Number(process.env.SMTP_PORT || 587);
+    const connectionTimeout = Number(
+      process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000,
+    );
+    const greetingTimeout = Number(
+      process.env.SMTP_GREETING_TIMEOUT_MS || 10000,
+    );
+    const socketTimeout = Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 15000);
     const secure =
       process.env.SMTP_SECURE === 'true' ||
       Number(process.env.SMTP_PORT) === 465;
@@ -35,6 +42,9 @@ export class MailService {
           user,
           pass,
         },
+        connectionTimeout,
+        greetingTimeout,
+        socketTimeout,
       });
     } else {
       this.logger.warn(
