@@ -95,15 +95,12 @@ describe('AuthService', () => {
     });
   });
 
-  it('returns the same generic message when the user does not exist', async () => {
+  it('reports when the email is not registered', async () => {
     usersService.findByEmail.mockResolvedValue(null);
 
     await expect(
       service.forgotPassword('missing@example.com'),
-    ).resolves.toEqual({
-      message:
-        'If an account with that email exists, a password reset link has been generated.',
-    });
+    ).rejects.toThrow('This email is not registered with us.');
 
     expect(prisma.verificationToken.create).not.toHaveBeenCalled();
   });

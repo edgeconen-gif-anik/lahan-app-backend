@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
@@ -215,11 +216,11 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
-    const normalizedEmail = email.toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
     const user = await this.usersService.findByEmail(normalizedEmail);
 
     if (!user?.email) {
-      return { message: PASSWORD_RESET_MESSAGE };
+      throw new NotFoundException('This email is not registered with us.');
     }
 
     const identifier = this.getPasswordResetIdentifier(normalizedEmail);
