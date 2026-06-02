@@ -376,6 +376,16 @@ export class UserService {
           siteIncharge: {
             select: { id: true, name: true, designation: true, image: true },
           },
+          contracts: {
+            where: { siteInchargeId: { not: null } },
+            take: 1,
+            orderBy: { updatedAt: 'desc' as const },
+            select: {
+              siteIncharge: {
+                select: { id: true, name: true, designation: true, image: true },
+              },
+            },
+          },
         },
       }),
       this.prisma.user.findMany({
@@ -455,10 +465,16 @@ export class UserService {
         ...c,
         contractAmount: Number(c.contractAmount),
       })),
-      completedProjects: completedProjects.map((project) => ({
-        ...project,
-        allocatedBudget: Number(project.allocatedBudget),
-      })),
+      completedProjects: completedProjects.map((project) => {
+        const { contracts, ...projectData } = project;
+        const contractSiteIncharge = contracts[0]?.siteIncharge ?? null;
+
+        return {
+          ...projectData,
+          allocatedBudget: Number(project.allocatedBudget),
+          siteIncharge: project.siteIncharge ?? contractSiteIncharge,
+        };
+      }),
       topUsersByProjects: topUsersByProjects.map((topUser) => ({
         id: topUser.id,
         name: topUser.name,

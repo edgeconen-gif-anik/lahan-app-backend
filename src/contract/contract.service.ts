@@ -289,6 +289,36 @@ export class ContractService {
     }
   }
 
+  private async syncProjectSiteIncharge(
+    tx: Prisma.TransactionClient,
+    projectId: string | null | undefined,
+    siteInchargeId: string | null | undefined,
+  ) {
+    if (!projectId || !siteInchargeId) {
+      return;
+    }
+
+    await tx.project.update({
+      where: { id: projectId },
+      data: { siteInchargeId },
+    });
+  }
+
+  private async clearProjectSiteInchargeIfMatched(
+    tx: Prisma.TransactionClient,
+    projectId: string | null | undefined,
+    siteInchargeId: string | null | undefined,
+  ) {
+    if (!projectId || !siteInchargeId) {
+      return;
+    }
+
+    await tx.project.updateMany({
+      where: { id: projectId, siteInchargeId },
+      data: { siteInchargeId: null },
+    });
+  }
+
   private async getNextCompletionCode(
     referenceDate: Date,
     fiscalYear?: string | null,
@@ -413,28 +443,38 @@ export class ContractService {
         : undefined;
 
     try {
-      return await this.prisma.contract.create({
-        data: {
-          ...rest,
-          fiscalYear: projectFiscalYear,
-          ...getApprovalStateForSave(user),
-          initiatedById: user.id,
-          actualCompletionDate,
-          completionCode,
-          contractAmount: new Prisma.Decimal(contractAmount),
-          finalEvaluatedAmount:
-            this.getFinalEvaluatedAmountPatch(finalEvaluatedAmount),
-          agreement: agreement
-            ? {
-                create: {
-                  ...agreement,
-                  amount: new Prisma.Decimal(agreement.amount),
-                },
-              }
-            : undefined,
-          workOrder: workOrder ? { create: workOrder } : undefined,
-        },
-        include: CONTRACT_INCLUDE,
+      return await this.prisma.$transaction(async (tx) => {
+        const contract = await tx.contract.create({
+          data: {
+            ...rest,
+            fiscalYear: projectFiscalYear,
+            ...getApprovalStateForSave(user),
+            initiatedById: user.id,
+            actualCompletionDate,
+            completionCode,
+            contractAmount: new Prisma.Decimal(contractAmount),
+            finalEvaluatedAmount:
+              this.getFinalEvaluatedAmountPatch(finalEvaluatedAmount),
+            agreement: agreement
+              ? {
+                  create: {
+                    ...agreement,
+                    amount: new Prisma.Decimal(agreement.amount),
+                  },
+                }
+              : undefined,
+            workOrder: workOrder ? { create: workOrder } : undefined,
+          },
+          include: CONTRACT_INCLUDE,
+        });
+
+        await this.syncProjectSiteIncharge(
+          tx,
+          contract.projectId,
+          contract.siteInchargeId,
+        );
+
+        return contract;
       });
     } catch (error) {
       if (
@@ -626,61 +666,79 @@ export class ContractService {
             )
           : undefined;
 
-        return await this.prisma.contract.update({
-          where: { id },
-          data: {
-            ...rest,
-            ...this.getApprovalPatchForUpdate(
-              existingContract,
-              user,
-              isStatusUpdate,
-            ),
-            initiatedById: isAdminUser(user)
-              ? existingContract.initiatedById
-              : user.id,
-            actualCompletionDate: resolvedActualCompletionDate,
-            completionCode,
-            fiscalYear: updatedProjectFiscalYear,
-            contractAmount:
-              contractAmount != null
-                ? new Prisma.Decimal(contractAmount)
+        return await this.prisma.$transaction(async (tx) => {
+          const contract = await tx.contract.update({
+            where: { id },
+            data: {
+              ...rest,
+              ...this.getApprovalPatchForUpdate(
+                existingContract,
+                user,
+                isStatusUpdate,
+              ),
+              initiatedById: isAdminUser(user)
+                ? existingContract.initiatedById
+                : user.id,
+              actualCompletionDate: resolvedActualCompletionDate,
+              completionCode,
+              fiscalYear: updatedProjectFiscalYear,
+              contractAmount:
+                contractAmount != null
+                  ? new Prisma.Decimal(contractAmount)
+                  : undefined,
+              finalEvaluatedAmount:
+                this.getFinalEvaluatedAmountPatch(finalEvaluatedAmount),
+              agreement: agreement
+                ? {
+                    upsert: {
+                      create: {
+                        ...agreement,
+                        content: agreement.content ?? '',
+                        agreementDate: agreement.agreementDate ?? new Date(),
+                        amount: new Prisma.Decimal(agreement.amount ?? 0),
+                      },
+                      update: {
+                        ...agreement,
+                        amount:
+                          agreement.amount != null
+                            ? new Prisma.Decimal(agreement.amount)
+                            : undefined,
+                      },
+                    },
+                  }
                 : undefined,
-            finalEvaluatedAmount:
-              this.getFinalEvaluatedAmountPatch(finalEvaluatedAmount),
-            agreement: agreement
-              ? {
-                  upsert: {
-                    create: {
-                      ...agreement,
-                      content: agreement.content ?? '',
-                      agreementDate: agreement.agreementDate ?? new Date(),
-                      amount: new Prisma.Decimal(agreement.amount ?? 0),
+              workOrder: workOrder
+                ? {
+                    upsert: {
+                      create: {
+                        ...workOrder,
+                        content: workOrder.content ?? '',
+                        workCompletionDate:
+                          workOrder.workCompletionDate ?? new Date(),
+                      },
+                      update: workOrder,
                     },
-                    update: {
-                      ...agreement,
-                      amount:
-                        agreement.amount != null
-                          ? new Prisma.Decimal(agreement.amount)
-                          : undefined,
-                    },
-                  },
-                }
-              : undefined,
-            workOrder: workOrder
-              ? {
-                  upsert: {
-                    create: {
-                      ...workOrder,
-                      content: workOrder.content ?? '',
-                      workCompletionDate:
-                        workOrder.workCompletionDate ?? new Date(),
-                    },
-                    update: workOrder,
-                  },
-                }
-              : undefined,
-          },
-          include: CONTRACT_INCLUDE,
+                  }
+                : undefined,
+            },
+            include: CONTRACT_INCLUDE,
+          });
+
+          if (contract.projectId !== existingContract.projectId) {
+            await this.clearProjectSiteInchargeIfMatched(
+              tx,
+              existingContract.projectId,
+              existingContract.siteInchargeId,
+            );
+          }
+
+          await this.syncProjectSiteIncharge(
+            tx,
+            contract.projectId,
+            contract.siteInchargeId,
+          );
+
+          return contract;
         });
       } catch (error) {
         if (
@@ -816,6 +874,12 @@ export class ContractService {
 
       await tx.agreement.deleteMany({ where: { contractId: id } });
       await tx.workOrder.deleteMany({ where: { contractId: id } });
+
+      await this.clearProjectSiteInchargeIfMatched(
+        tx,
+        contract.projectId,
+        contract.siteInchargeId,
+      );
 
       return tx.contract.delete({ where: { id } });
     });
