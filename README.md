@@ -67,10 +67,11 @@ the safe template for required environment variables.
 Password reset email uses SMTP through Nodemailer. For Brevo, copy
 `.env.example` to `.env`, set `SMTP_USER` to the Brevo SMTP login, set
 `SMTP_PASS` to the generated Brevo SMTP key, and set `MAIL_FROM` to a sender
-authorized in Brevo. Brevo's relay uses `smtp-relay.brevo.com` on port `587`
-with `SMTP_SECURE=false` (STARTTLS). In local development, if SMTP is not
-configured, the backend logs the reset link so password reset can still be
-tested.
+authorized in Brevo. For deployment on Render free web services, use Brevo's
+alternative SMTP port `2525` with `SMTP_SECURE=false`, because Render blocks
+outbound SMTP traffic to ports `25`, `465`, and `587` on free services. In
+local development, if SMTP is not configured, the backend logs the reset link
+so password reset can still be tested.
 
 If Google sign-in is enabled, set `GOOGLE_CLIENT_ID` in the backend too. The
 backend verifies the Google ID token before creating a session.

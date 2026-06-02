@@ -20,6 +20,8 @@ describe('ContractService', () => {
     },
     project: {
       findUnique: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
     },
     agreement: {
       deleteMany: jest.fn(),
@@ -33,6 +35,9 @@ describe('ContractService', () => {
   beforeEach(() => {
     service = new ContractService(prisma as any);
     prisma.project.findUnique.mockResolvedValue({ fiscalYear: '2082/083' });
+    prisma.project.update.mockResolvedValue({});
+    prisma.project.updateMany.mockResolvedValue({ count: 0 });
+    prisma.$transaction.mockImplementation((callback) => callback(prisma));
   });
 
   afterEach(() => {
