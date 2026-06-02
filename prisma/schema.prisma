@@ -70,26 +70,27 @@ model VerificationToken {
 }
 
 model Company {
-  id                      String           @id @default(uuid())
-  name                    String
-  panNumber               Int              @unique
-  address                 String
-  contactPerson           String?
-  phoneNumber             String?
-  email                   String?          @unique
-  registrationRequestDate DateTime?
-  registrationDate        DateTime?
-  category                CompanyCategory?
-  isContracted            Boolean          @default(false)
-  panVerified             Boolean          @default(false)
-  approvalStatus          ApprovalStatus   @default(APPROVED)
-  approvedAt              DateTime?
-  remarks                 String?
-  createdAt               DateTime         @default(now())
-  updatedAt               DateTime         @updatedAt
-  voucherNo               String?
-  contracts               Contract[]
-  projects                Project[]
+  id                       String           @id @default(uuid())
+  name                     String
+  panNumber                Int              @unique
+  address                  String
+  contactPerson            String?
+  phoneNumber              String?
+  email                    String?          @unique
+  registrationRequestDate  DateTime?
+  registrationDate         DateTime?
+  category                 CompanyCategory?
+  isContracted             Boolean          @default(false)
+  panVerified              Boolean          @default(false)
+  approvalStatus           ApprovalStatus   @default(APPROVED)
+  approvedAt               DateTime?
+  remarks                  String?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+  voucherNo                String?
+  officeRegistrationNumber String?          @unique
+  contracts                Contract[]
+  projects                 Project[]
 
   @@index([name])
   @@index([panNumber])

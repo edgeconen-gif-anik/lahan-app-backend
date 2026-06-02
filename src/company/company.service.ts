@@ -16,11 +16,35 @@ import {
 export class CompanyService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private normalizeCompanyData<T extends { officeRegistrationNumber?: string | null }>(
+    data: T,
+  ) {
+    if (!('officeRegistrationNumber' in data)) {
+      return data;
+    }
+
+    return {
+      ...data,
+      officeRegistrationNumber:
+        data.officeRegistrationNumber?.trim() || null,
+    };
+  }
+
+  private withoutOfficeRegistrationNumber<
+    T extends { officeRegistrationNumber?: string | null },
+  >(data: T) {
+    const copy = { ...data };
+    delete copy.officeRegistrationNumber;
+    return copy;
+  }
+
   async create(data: CreateCompanyDto, user: AuthUser) {
+    const createData = this.withoutOfficeRegistrationNumber(data);
+
     try {
       return await this.prisma.company.create({
         data: {
-          ...data,
+          ...createData,
           ...getApprovalStateForSave(user),
         },
       });
@@ -33,12 +57,14 @@ export class CompanyService {
         if (Array.isArray(target)) {
           if (target.includes('panNumber')) throw new ConflictException('PAN Number already exists.');
           if (target.includes('email')) throw new ConflictException('Email already exists.');
+          if (target.includes('officeRegistrationNumber')) throw new ConflictException('Office registration number already exists.');
         } 
         
         // 2. Fallback: Sometimes target is just a string (depending on DB driver versions)
         if (typeof target === 'string') {
            if (target.includes('panNumber')) throw new ConflictException('PAN Number already exists.');
            if (target.includes('email')) throw new ConflictException('Email already exists.');
+           if (target.includes('officeRegistrationNumber')) throw new ConflictException('Office registration number already exists.');
         }
 
         // 3. Generic Fallback if we can't identify the field
@@ -62,6 +88,7 @@ export class CompanyService {
       const isNumber = !isNaN(Number(search));
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
+        { officeRegistrationNumber: { contains: search, mode: 'insensitive' } },
         ...(isNumber ? [{ panNumber: { equals: Number(search) } }] : []),
       ];
     }
@@ -85,11 +112,13 @@ export class CompanyService {
 
   async update(id: string, data: UpdateCompanyDto, user: AuthUser) {
     await this.findOne(id, user);
+    const updateData = this.normalizeCompanyData(data);
+
     try {
       return await this.prisma.company.update({
         where: { id },
         data: {
-          ...data,
+          ...updateData,
           ...getApprovalStateForSave(user),
         },
       });
@@ -100,6 +129,7 @@ export class CompanyService {
             if (Array.isArray(target) || typeof target === 'string') {
                  if (target.includes('panNumber')) throw new ConflictException('Update failed: PAN Number already in use.');
                  if (target.includes('email')) throw new ConflictException('Update failed: Email already in use.');
+                 if (target.includes('officeRegistrationNumber')) throw new ConflictException('Update failed: Office registration number already in use.');
             }
             throw new ConflictException('Update failed: Unique constraint violation.');
         }

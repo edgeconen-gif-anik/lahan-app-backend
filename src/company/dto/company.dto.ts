@@ -18,6 +18,11 @@ export const CompanySchema = z.object({
   
   // ✅ FIXED: Added parentheses, matched Prisma name, and made optional
   voucherNo: z.string().optional(), 
+
+  officeRegistrationNumber: z
+    .union([z.literal(''), z.string().trim().min(1).max(50)])
+    .optional()
+    .nullable(),
   
   contactPerson: z.string().optional(),
   
