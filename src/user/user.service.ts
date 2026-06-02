@@ -296,7 +296,15 @@ export class UserService {
     this.requireSelfOrAdmin(userId, requester);
     const approvedContractWhere = this.getApprovedContractWhere(requester);
 
-    const [user, totalManagedContracts] = await this.prisma.$transaction([
+    const [
+      user,
+      totalManagedContracts,
+      projectStatusCounts,
+      totalProjects,
+      budgetSummary,
+      completedProjects,
+      topUsersByProjects,
+    ] = await this.prisma.$transaction([
       this.prisma.user.findUnique({
         where: { id: userId },
         select: {
@@ -340,9 +348,80 @@ export class UserService {
           ...approvedContractWhere,
         },
       }),
+      this.prisma.project.groupBy({
+        by: ['status'],
+        orderBy: { status: 'asc' as const },
+        _count: true,
+      }),
+      this.prisma.project.count(),
+      this.prisma.project.aggregate({
+        _sum: {
+          allocatedBudget: true,
+          internalBudget: true,
+          centralBudget: true,
+          provinceBudget: true,
+        },
+      }),
+      this.prisma.project.findMany({
+        where: { status: 'COMPLETED' },
+        take: 6,
+        orderBy: { updatedAt: 'desc' as const },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          allocatedBudget: true,
+          fiscalYear: true,
+          sNo: true,
+          siteIncharge: {
+            select: { id: true, name: true, designation: true, image: true },
+          },
+        },
+      }),
+      this.prisma.user.findMany({
+        take: 3,
+        orderBy: {
+          siteInchargeProjects: {
+            _count: 'desc',
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          designation: true,
+          image: true,
+          _count: {
+            select: {
+              siteInchargeProjects: true,
+              managedContracts: true,
+            },
+          },
+        },
+      }),
     ]);
 
     if (!user) throw new NotFoundException('User not found');
+
+    const statusCounts = projectStatusCounts.reduce(
+      (acc, item) => {
+        const count =
+          typeof item._count === 'number'
+            ? item._count
+            : typeof item._count === 'object' && item._count !== null
+              ? item._count._all
+              : 0;
+        acc[item.status] = count ?? 0;
+        return acc;
+      },
+      {
+        NOT_STARTED: 0,
+        ONGOING: 0,
+        COMPLETED: 0,
+        ARCHIVED: 0,
+      } as Record<string, number>,
+    );
+    const completedProjectCount = statusCounts.COMPLETED ?? 0;
 
     return {
       userProfile: {
@@ -352,6 +431,19 @@ export class UserService {
         email:       user.email,
       },
       stats: {
+        totalProjects,
+        totalBudget: Number(budgetSummary._sum.allocatedBudget ?? 0),
+        internalBudget: Number(budgetSummary._sum.internalBudget ?? 0),
+        centralBudget: Number(budgetSummary._sum.centralBudget ?? 0),
+        provinceBudget: Number(budgetSummary._sum.provinceBudget ?? 0),
+        completedProjects: completedProjectCount,
+        ongoingProjects: statusCounts.ONGOING ?? 0,
+        notStartedProjects: statusCounts.NOT_STARTED ?? 0,
+        archivedProjects: statusCounts.ARCHIVED ?? 0,
+        completionRate:
+          totalProjects > 0
+            ? Math.round((completedProjectCount / totalProjects) * 100)
+            : 0,
         totalSiteInchargeProjects: user._count.siteInchargeProjects,
         totalManagedContracts,
       },
@@ -362,6 +454,19 @@ export class UserService {
       recentContracts: user.managedContracts.map((c) => ({
         ...c,
         contractAmount: Number(c.contractAmount),
+      })),
+      completedProjects: completedProjects.map((project) => ({
+        ...project,
+        allocatedBudget: Number(project.allocatedBudget),
+      })),
+      topUsersByProjects: topUsersByProjects.map((topUser) => ({
+        id: topUser.id,
+        name: topUser.name,
+        email: topUser.email,
+        designation: topUser.designation,
+        image: topUser.image,
+        projectCount: topUser._count.siteInchargeProjects,
+        contractCount: topUser._count.managedContracts,
       })),
     };
   }
