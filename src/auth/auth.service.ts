@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -14,6 +15,8 @@ import { UserService } from '../user/user.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { getIdleSessionExpiry } from './session-config';
 import { MailService } from '../mail/mail.service';
+import { SignupDto } from './dto/auth.dto';
+import { ApprovalStatus } from '@prisma/client';
 
 interface GoogleUserDto {
   email: string;
@@ -32,6 +35,8 @@ const PASSWORD_RESET_PREFIX = 'password-reset:';
 const PASSWORD_RESET_TTL_MINUTES = 15;
 const PASSWORD_RESET_MESSAGE =
   'If an account with that email exists, a password reset link has been generated.';
+const EMAIL_VERIFY_PREFIX = 'email-verify:';
+const EMAIL_VERIFY_TTL_MINUTES = 60;
 
 @Injectable()
 export class AuthService {
@@ -61,6 +66,11 @@ export class AuthService {
         return null;
       }
 
+      if (!this.canUserLogin(user)) {
+        this.logger.debug(`Login blocked for onboarding user ${normalizedEmail}`);
+        return null;
+      }
+
       const isMatch = await bcrypt.compare(pass, user.password);
 
       if (isMatch) {
@@ -78,6 +88,12 @@ export class AuthService {
   }
 
   async login(user: any) {
+    if (!this.canUserLogin(user)) {
+      throw new UnauthorizedException(
+        'Admin approval is required before sign in',
+      );
+    }
+
     const now = new Date();
 
     await this.prisma.session.deleteMany({
@@ -157,6 +173,7 @@ export class AuthService {
             name: googleUser.name,
             image: googleUser.image,
             emailVerified: new Date(),
+            approvalStatus: ApprovalStatus.PENDING,
           },
         });
 
@@ -276,7 +293,7 @@ export class AuthService {
   }
 
   async resetPassword(token: string, newPassword: string) {
-    const hashedToken = this.hashResetToken(token);
+    const hashedToken = this.hashToken(token);
     const verificationToken = await this.prisma.verificationToken.findUnique({
       where: { token: hashedToken },
     });
@@ -320,7 +337,130 @@ export class AuthService {
     return { message: 'Password reset successful' };
   }
 
+  async signup(dto: SignupDto) {
+    const normalizedEmail = dto.email.trim().toLowerCase();
+    const existingUser = await this.usersService.findByEmail(normalizedEmail);
+
+    if (existingUser) {
+      throw new ConflictException('An account with this email already exists');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const rawToken = randomBytes(32).toString('hex');
+    const hashedToken = this.hashToken(rawToken);
+    const identifier = this.getEmailVerifyIdentifier(normalizedEmail);
+    const expires = new Date(
+      Date.now() + EMAIL_VERIFY_TTL_MINUTES * 60 * 1000,
+    );
+
+    await this.prisma.$transaction([
+      this.prisma.user.create({
+        data: {
+          name: dto.name,
+          email: normalizedEmail,
+          password: passwordHash,
+          approvalStatus: ApprovalStatus.PENDING,
+        },
+      }),
+      this.prisma.verificationToken.deleteMany({
+        where: { identifier },
+      }),
+      this.prisma.verificationToken.create({
+        data: {
+          identifier,
+          token: hashedToken,
+          expires,
+        },
+      }),
+    ]);
+
+    const frontendUrl = this.getFrontendUrl();
+    const verifyUrl = `${frontendUrl}/verify-email?token=${rawToken}`;
+
+    let emailSent = false;
+    try {
+      emailSent = await this.mailService.sendEmailVerificationEmail({
+        to: normalizedEmail,
+        verifyUrl,
+        expiresInMinutes: EMAIL_VERIFY_TTL_MINUTES,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Unable to send email verification to ${normalizedEmail}`,
+        error,
+      );
+    }
+
+    if (!emailSent && process.env.NODE_ENV === 'production') {
+      throw new ServiceUnavailableException(
+        'Unable to send verification email right now. Please try again later.',
+      );
+    }
+
+    return {
+      message:
+        'Account created. Verify your email, then wait for admin approval.',
+      ...(this.shouldExposeResetUrl(emailSent) ? { verifyUrl } : {}),
+    };
+  }
+
+  async verifyEmail(token: string) {
+    const hashedToken = this.hashToken(token);
+    const verificationToken = await this.prisma.verificationToken.findUnique({
+      where: { token: hashedToken },
+    });
+
+    if (!verificationToken || verificationToken.expires < new Date()) {
+      throw new BadRequestException(
+        'Verification token is invalid or has expired',
+      );
+    }
+
+    const email = this.getEmailFromVerifyIdentifier(
+      verificationToken.identifier,
+    );
+
+    if (!email) {
+      await this.prisma.verificationToken.delete({
+        where: { token: hashedToken },
+      });
+      throw new BadRequestException(
+        'Verification token is invalid or has expired',
+      );
+    }
+
+    const user = await this.usersService.findByEmail(email);
+
+    if (!user) {
+      await this.prisma.verificationToken.deleteMany({
+        where: { identifier: verificationToken.identifier },
+      });
+      throw new BadRequestException(
+        'Verification token is invalid or has expired',
+      );
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerified: new Date() },
+      }),
+      this.prisma.verificationToken.deleteMany({
+        where: { identifier: verificationToken.identifier },
+      }),
+    ]);
+
+    return {
+      message:
+        'Email verified. Your account is waiting for administrator approval.',
+    };
+  }
+
   private hashResetToken(token: string) {
+    return this.hashToken(token);
+  }
+
+  private hashToken(token: string) {
     return createHash('sha256').update(token).digest('hex');
   }
 
@@ -334,6 +474,30 @@ export class AuthService {
     }
 
     return identifier.slice(PASSWORD_RESET_PREFIX.length);
+  }
+
+  private getEmailVerifyIdentifier(email: string) {
+    return `${EMAIL_VERIFY_PREFIX}${email}`;
+  }
+
+  private getEmailFromVerifyIdentifier(identifier: string) {
+    if (!identifier.startsWith(EMAIL_VERIFY_PREFIX)) {
+      return null;
+    }
+
+    return identifier.slice(EMAIL_VERIFY_PREFIX.length);
+  }
+
+  private getFrontendUrl() {
+    return (
+      process.env.FRONTEND_URL || 'https://lahan-app-frontend.onrender.com'
+    ).replace(/\/$/, '');
+  }
+
+  private canUserLogin(user: {
+    approvalStatus?: ApprovalStatus | null;
+  }) {
+    return user.approvalStatus === ApprovalStatus.APPROVED;
   }
 
   private shouldExposeResetUrl(emailSent: boolean) {

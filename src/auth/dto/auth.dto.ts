@@ -31,7 +31,22 @@ export const ResetPasswordSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
+export const SignupSchema = z.object({
+  name: z.string().min(3, 'Name must be at least 3 characters').max(100),
+  email: z
+    .string()
+    .email('Invalid email address')
+    .transform((e) => e.toLowerCase()),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+});
+
+export const VerifyEmailSchema = z.object({
+  token: z.string().min(1, 'Verification token is required'),
+});
+
 export class LoginDto extends createZodDto(LoginSchema) {}
 export class GoogleLoginDto extends createZodDto(GoogleLoginSchema) {}
 export class ForgotPasswordDto extends createZodDto(ForgotPasswordSchema) {}
 export class ResetPasswordDto extends createZodDto(ResetPasswordSchema) {}
+export class SignupDto extends createZodDto(SignupSchema) {}
+export class VerifyEmailDto extends createZodDto(VerifyEmailSchema) {}

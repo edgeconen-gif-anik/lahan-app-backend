@@ -16,6 +16,8 @@ const RoleEnum = z.enum([
   'ADMIN'
 ]);
 
+const ApprovalStatusEnum = z.enum(['PENDING', 'APPROVED', 'REJECTED']);
+
 // ==========================================
 // 2. Create User Schema
 // ==========================================
@@ -43,6 +45,8 @@ export const CreateUserSchema = z.object({
   // UPDATED: Now optional. 
   // You can keep the default if you want new manual users to be CREATORs automatically
   role: RoleEnum.optional().default('CREATOR'), 
+
+  approvalStatus: ApprovalStatusEnum.optional(),
 });
 
 // ==========================================
@@ -57,8 +61,14 @@ export const QueryUserSchema = z.object({
   search: z.string().optional(),
   designation: DesignationEnum.optional(),
   role: RoleEnum.optional(),
+  approvalStatus: ApprovalStatusEnum.optional(),
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).default(10),
+});
+
+export const ApproveUserSchema = z.object({
+  role: RoleEnum,
+  designation: DesignationEnum,
 });
 
 // ==========================================
@@ -67,3 +77,4 @@ export const QueryUserSchema = z.object({
 export class CreateUserDto extends createZodDto(CreateUserSchema) {}
 export class UpdateUserDto extends createZodDto(UpdateUserSchema) {}
 export class QueryUserDto extends createZodDto(QueryUserSchema) {}
+export class ApproveUserDto extends createZodDto(ApproveUserSchema) {}

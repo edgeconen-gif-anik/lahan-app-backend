@@ -15,6 +15,8 @@ import {
   GoogleLoginDto,
   LoginDto,
   ResetPasswordDto,
+  SignupDto,
+  VerifyEmailDto,
 } from './dto/auth.dto';
 import { JwtAuthGuard } from './guard/jwt-auth.guard';
 
@@ -51,6 +53,18 @@ export class AuthController {
       this.logger.error(`Google login failed for ${googleDto.email}`, error);
       throw new UnauthorizedException('Google authentication failed');
     }
+  }
+
+  @Post('signup')
+  @HttpCode(HttpStatus.CREATED)
+  async signup(@Body() signupDto: SignupDto) {
+    return this.authService.signup(signupDto);
+  }
+
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  async verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
+    return this.authService.verifyEmail(verifyEmailDto.token);
   }
 
   @UseGuards(JwtAuthGuard)

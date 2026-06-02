@@ -7,6 +7,12 @@ type PasswordResetEmailInput = {
   expiresInMinutes: number;
 };
 
+type EmailVerificationInput = {
+  to: string;
+  verifyUrl: string;
+  expiresInMinutes: number;
+};
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -48,7 +54,7 @@ export class MailService {
       });
     } else {
       this.logger.warn(
-        'SMTP email is not configured. Password reset links will be written to the server log.',
+        'SMTP email is not configured. Email links will be written to the server log.',
       );
     }
   }
@@ -99,6 +105,51 @@ export class MailService {
     });
 
     this.logger.log(`Password reset email sent to ${to}`);
+    return true;
+  }
+
+  async sendEmailVerificationEmail({
+    to,
+    verifyUrl,
+    expiresInMinutes,
+  }: EmailVerificationInput) {
+    const subject = 'Verify your Lahan Project account';
+    const text = [
+      'A Lahan Project account was created with this email address.',
+      '',
+      `Open this link within ${expiresInMinutes} minutes to verify your email:`,
+      verifyUrl,
+      '',
+      'After verification, an administrator must approve your account before you can sign in.',
+    ].join('\n');
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
+        <h2 style="margin: 0 0 12px;">Verify your email</h2>
+        <p>A Lahan Project account was created with this email address.</p>
+        <p>
+          <a href="${verifyUrl}" style="display: inline-block; padding: 10px 14px; background: #111827; color: #ffffff; text-decoration: none; border-radius: 6px;">
+            Verify email
+          </a>
+        </p>
+        <p>This link expires in ${expiresInMinutes} minutes.</p>
+        <p>After verification, an administrator must approve your account before you can sign in.</p>
+      </div>
+    `;
+
+    if (!this.transporter) {
+      this.logger.warn(`Email verification link for ${to}: ${verifyUrl}`);
+      return false;
+    }
+
+    await this.transporter.sendMail({
+      from: this.from,
+      to,
+      subject,
+      text,
+      html,
+    });
+
+    this.logger.log(`Email verification sent to ${to}`);
     return true;
   }
 }

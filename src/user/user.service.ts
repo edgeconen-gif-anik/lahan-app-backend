@@ -6,7 +6,12 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateUserDto, UpdateUserDto, QueryUserDto } from './dto/user.dto';
+import {
+  ApproveUserDto,
+  CreateUserDto,
+  UpdateUserDto,
+  QueryUserDto,
+} from './dto/user.dto';
 import * as bcrypt from 'bcrypt';
 import { ApprovalStatus, Prisma } from '@prisma/client';
 import { AuthUser, isAdminUser, requireAdminUser } from '../auth/auth-user';
@@ -66,7 +71,7 @@ export class UserService {
   async findAll(query: QueryUserDto, requester: AuthUser) {
     requireAdminUser(requester);
 
-    const { search, designation, role, page, limit } = query;
+    const { search, designation, role, approvalStatus, page, limit } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.UserWhereInput = {
@@ -81,6 +86,7 @@ export class UserService {
           : {},
         designation ? { designation } : {},
         role        ? { role }        : {},
+        approvalStatus ? { approvalStatus } : {},
       ],
     };
 
@@ -97,6 +103,7 @@ export class UserService {
           email:         true,
           role:          true,
           designation:   true,
+          approvalStatus: true,
           image:         true,
           createdAt:     true,
           updatedAt:     true,  // ✅ added
@@ -129,6 +136,7 @@ export class UserService {
         email:         true,
         role:          true,
         designation:   true,
+        approvalStatus: true,
         image:         true,
         createdAt:     true,
         updatedAt:     true,
@@ -159,6 +167,7 @@ export class UserService {
         email:       true,
         role:        true,
         designation: true,
+        approvalStatus: true,
         image:       true,
         createdAt:   true,
 
@@ -303,7 +312,7 @@ export class UserService {
       totalProjects,
       budgetSummary,
       completedProjects,
-      topUsersByProjects,
+      usersForRanking,
     ] = await this.prisma.$transaction([
       this.prisma.user.findUnique({
         where: { id: userId },
@@ -389,21 +398,20 @@ export class UserService {
         },
       }),
       this.prisma.user.findMany({
-        take: 3,
-        orderBy: {
-          siteInchargeProjects: {
-            _count: 'desc',
-          },
-        },
         select: {
           id: true,
           name: true,
           email: true,
           designation: true,
           image: true,
+          siteInchargeProjects: {
+            select: { id: true },
+          },
+          managedContracts: {
+            select: { projectId: true },
+          },
           _count: {
             select: {
-              siteInchargeProjects: true,
               managedContracts: true,
             },
           },
@@ -475,15 +483,26 @@ export class UserService {
           siteIncharge: project.siteIncharge ?? contractSiteIncharge,
         };
       }),
-      topUsersByProjects: topUsersByProjects.map((topUser) => ({
-        id: topUser.id,
-        name: topUser.name,
-        email: topUser.email,
-        designation: topUser.designation,
-        image: topUser.image,
-        projectCount: topUser._count.siteInchargeProjects,
-        contractCount: topUser._count.managedContracts,
-      })),
+      topUsersByProjects: usersForRanking
+        .map((topUser) => {
+          const projectIds = new Set([
+            ...topUser.siteInchargeProjects.map((project) => project.id),
+            ...topUser.managedContracts.map((contract) => contract.projectId),
+          ]);
+
+          return {
+            id: topUser.id,
+            name: topUser.name,
+            email: topUser.email,
+            designation: topUser.designation,
+            image: topUser.image,
+            projectCount: projectIds.size,
+            contractCount: topUser._count.managedContracts,
+          };
+        })
+        .filter((topUser) => topUser.projectCount > 0)
+        .sort((a, b) => b.projectCount - a.projectCount)
+        .slice(0, 3),
     };
   }
 
@@ -501,6 +520,44 @@ export class UserService {
     return this.prisma.user.update({
       where: { id },
       data:  updateUserDto,
+    });
+  }
+
+  async approve(id: string, approveUserDto: ApproveUserDto, requester: AuthUser) {
+    requireAdminUser(requester);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        emailVerified: true,
+      },
+    });
+
+    if (!user) throw new NotFoundException(`User with ID ${id} not found`);
+
+    if (!user.emailVerified) {
+      throw new ForbiddenException(
+        'User must verify their email before admin approval',
+      );
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        approvalStatus: ApprovalStatus.APPROVED,
+        role: approveUserDto.role,
+        designation: approveUserDto.designation,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        designation: true,
+        approvalStatus: true,
+        emailVerified: true,
+      },
     });
   }
 

@@ -16,7 +16,12 @@ import {
 } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { UserService } from './user.service';
-import { CreateUserDto, UpdateUserDto, QueryUserDto } from './dto/user.dto';
+import {
+  ApproveUserDto,
+  CreateUserDto,
+  UpdateUserDto,
+  QueryUserDto,
+} from './dto/user.dto';
 import { JwtAuthGuard } from '../auth/guard/jwt-auth.guard';
 
 @Controller('users')
@@ -60,6 +65,16 @@ export class UserController {
     @Request() req,
   ) {
     return this.userService.update(id, updateUserDto, req.user);
+  }
+
+  @Patch(':id/approve')
+  @UsePipes(ZodValidationPipe)
+  approve(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() approveUserDto: ApproveUserDto,
+    @Request() req,
+  ) {
+    return this.userService.approve(id, approveUserDto, req.user);
   }
 
   @Delete(':id')
