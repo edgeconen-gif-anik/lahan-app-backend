@@ -260,9 +260,7 @@ export class AuthService {
       },
     });
 
-    const frontendUrl = (
-      process.env.FRONTEND_URL || 'https://lahan-app-frontend.onrender.com'
-    ).replace(/\/$/, '');
+    const frontendUrl = this.getFrontendUrl();
     const resetUrl = `${frontendUrl}/reset-password?token=${rawToken}`;
 
     let emailSent = false;
