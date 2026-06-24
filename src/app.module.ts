@@ -11,12 +11,22 @@ import { AuthModule } from './auth/auth.module';
 import { UserCommitteeService } from './user-committee/user-committee.service';
 import { UserCommitteeController } from './user-committee/user-committee.controller';
 import { SetupModule } from './setup/setup.module';
+import { FuelModule } from './fuel/fuel.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({
+  imports: [
+    ConfigModule.forRoot({
       isGlobal: true, // Makes .env available to all modules (including Prisma)
     }),
-    PrismaModule, CompanyModule, ProjectModule, ContractModule, UserModule, AuthModule, SetupModule],
+    PrismaModule,
+    CompanyModule,
+    ProjectModule,
+    ContractModule,
+    UserModule,
+    AuthModule,
+    SetupModule,
+    FuelModule,
+  ],
   controllers: [AppController, UserCommitteeController],
   providers: [AppService, UserCommitteeService],
 })
