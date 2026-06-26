@@ -178,6 +178,7 @@ export class FuelService {
           logDate: data.logDate,
           remarks: data.remarks,
           ...getApprovalStateForSave(user),
+          approvedById: isAdminUser(user) ? user.id : undefined,
           rejectedAt: null,
         },
         include: FUEL_LOG_INCLUDE,

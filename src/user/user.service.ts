@@ -13,8 +13,49 @@ import {
   QueryUserDto,
 } from './dto/user.dto';
 import * as bcrypt from 'bcrypt';
-import { ApprovalStatus, Prisma } from '@prisma/client';
+import { ApprovalStatus, FuelType, Prisma } from '@prisma/client';
 import { AuthUser, isAdminUser, requireAdminUser } from '../auth/auth-user';
+import {
+  getCurrentNepaliFiscalYear,
+  normalizeFiscalYear,
+} from '../setup/fiscal-year';
+
+const FISCAL_MONTHS = [
+  'Shrawan',
+  'Bhadra',
+  'Ashwin',
+  'Kartik',
+  'Mangsir',
+  'Poush',
+  'Magh',
+  'Falgun',
+  'Chaitra',
+  'Baishakh',
+  'Jestha',
+  'Ashadh',
+];
+
+function toNumber(value: Prisma.Decimal | number | null | undefined) {
+  return value == null ? 0 : Number(value);
+}
+
+function getFiscalYearStartDate(fiscalYear: string) {
+  const normalized = normalizeFiscalYear(fiscalYear);
+  const bsStartYear = Number(normalized?.slice(0, 4));
+  const adStartYear = Number.isFinite(bsStartYear)
+    ? bsStartYear - 57
+    : new Date().getFullYear();
+
+  return new Date(Date.UTC(adStartYear, 6, 16));
+}
+
+function getFiscalMonthIndex(logDate: Date, fiscalYearStart: Date) {
+  const monthDiff =
+    (logDate.getUTCFullYear() - fiscalYearStart.getUTCFullYear()) * 12 +
+    (logDate.getUTCMonth() - fiscalYearStart.getUTCMonth());
+
+  return Math.min(Math.max(monthDiff, 0), 11);
+}
 
 @Injectable()
 export class UserService {
@@ -237,6 +278,77 @@ export class UserService {
 
     if (!user) throw new NotFoundException(`User ${id} not found`);
 
+    const settings = await this.prisma.systemSetting.findUnique({
+      where: { id: 'default' },
+      select: { currentFiscalYear: true },
+    });
+    const currentFiscalYear =
+      normalizeFiscalYear(settings?.currentFiscalYear) ??
+      getCurrentNepaliFiscalYear();
+    const fiscalYearStart = getFiscalYearStartDate(currentFiscalYear);
+    const fiscalYearEnd = new Date(fiscalYearStart);
+    fiscalYearEnd.setUTCFullYear(fiscalYearEnd.getUTCFullYear() + 1);
+
+    const fuelLogs = await this.prisma.fuelLog.findMany({
+      where: {
+        userId: id,
+        approvalStatus: ApprovalStatus.APPROVED,
+        OR: [
+          { logDate: { gte: fiscalYearStart, lt: fiscalYearEnd } },
+          { project: { fiscalYear: currentFiscalYear } },
+          { contract: { fiscalYear: currentFiscalYear } },
+        ],
+      },
+      select: {
+        fuelType: true,
+        quantityLiters: true,
+        totalAmount: true,
+        logDate: true,
+      },
+      orderBy: { logDate: 'asc' as const },
+    });
+
+    const fuelUsageMonths = FISCAL_MONTHS.map((month, index) => ({
+      key: `${currentFiscalYear}-${index + 1}`,
+      month,
+      monthIndex: index + 1,
+      petrolLiters: 0,
+      dieselLiters: 0,
+      totalLiters: 0,
+      totalAmount: 0,
+      logCount: 0,
+    }));
+
+    for (const fuelLog of fuelLogs) {
+      const monthIndex = getFiscalMonthIndex(fuelLog.logDate, fiscalYearStart);
+      const month = fuelUsageMonths[monthIndex];
+      const quantityLiters = toNumber(fuelLog.quantityLiters);
+      const totalAmount = toNumber(fuelLog.totalAmount);
+
+      if (fuelLog.fuelType === FuelType.PETROL) {
+        month.petrolLiters += quantityLiters;
+      } else {
+        month.dieselLiters += quantityLiters;
+      }
+
+      month.totalLiters += quantityLiters;
+      month.totalAmount += totalAmount;
+      month.logCount += 1;
+    }
+
+    const fuelUsage = {
+      fiscalYear: currentFiscalYear,
+      totalLiters: fuelUsageMonths.reduce(
+        (sum, month) => sum + month.totalLiters,
+        0,
+      ),
+      totalAmount: fuelUsageMonths.reduce(
+        (sum, month) => sum + month.totalAmount,
+        0,
+      ),
+      months: fuelUsageMonths,
+    };
+
     // ── Per-project computed stats ─────────────────────────────────────────
     const projectsWithStats = user.siteInchargeProjects.map((project) => {
       const totalContractValue = project.contracts.reduce(
@@ -292,6 +404,7 @@ export class UserService {
       image:       user.image,
       createdAt:   user.createdAt,
       summary,
+      fuelUsage,
       siteInchargeProjects: projectsWithStats,
       managedContracts:     user.managedContracts,
     };
