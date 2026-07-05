@@ -1,6 +1,8 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
+const ApprovalStatusEnum = z.enum(['PENDING', 'APPROVED', 'REJECTED']);
+
 // Match Prisma Enums
 const CommitteeRoleEnum = z.enum([
   'PRESIDENT',
@@ -55,6 +57,7 @@ export const UpdateUserCommitteeSchema = CreateUserCommitteeSchema.partial();
 export const QueryUserCommitteeSchema = z.object({
   search: z.string().optional(), // Searches name or address
   fiscalYear: z.string().optional(),
+  approvalStatus: ApprovalStatusEnum.optional(),
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).default(10),
 });

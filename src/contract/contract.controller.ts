@@ -15,6 +15,7 @@ import {
   UsePipes,
 } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
+import { ApprovalStatus } from '@prisma/client';
 import { ContractService } from './contract.service';
 import {
   CreateContractDto,
@@ -48,6 +49,7 @@ export class ContractController {
     @Query('userId') userId?: string,
     @Query('siteInchargeId') siteInchargeId?: string,
     @Query('fiscalYear') fiscalYear?: string,
+    @Query('approvalStatus') approvalStatus?: ApprovalStatus,
     @Request() req?,
   ) {
     return this.contractService.findAll(
@@ -58,6 +60,7 @@ export class ContractController {
         userId,
         siteInchargeId,
         fiscalYear,
+        approvalStatus,
       },
       req.user,
     );

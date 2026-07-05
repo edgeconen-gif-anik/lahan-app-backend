@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCompanyDto, UpdateCompanyDto } from './dto/company.dto';
-import { Prisma } from '@prisma/client';
+import { ApprovalStatus, CompanyCategory, Prisma } from '@prisma/client';
 import {
   AuthUser,
   getApprovalStateForSave,
@@ -78,10 +78,14 @@ export class CompanyService {
   }
 
   async findAll(
-    params: { search?: string; category?: any },
+    params: {
+      search?: string;
+      category?: CompanyCategory;
+      approvalStatus?: ApprovalStatus;
+    },
     _user: AuthUser,
   ) {
-    const { search, category } = params;
+    const { search, category, approvalStatus } = params;
     const where: Prisma.CompanyWhereInput = {};
 
     if (search) {
@@ -93,6 +97,7 @@ export class CompanyService {
       ];
     }
     if (category) where.category = category;
+    if (approvalStatus) where.approvalStatus = approvalStatus;
 
     return this.prisma.company.findMany({
       where,

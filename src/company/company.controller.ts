@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { CompanyService } from './company.service';
 import { CreateCompanyDto, UpdateCompanyDto } from './dto/company.dto';
-import { CompanyCategory } from '@prisma/client';
+import { ApprovalStatus, CompanyCategory } from '@prisma/client';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { ZodValidationPipe } from 'nestjs-zod'; // <--- IMPORT THIS
 import { JwtAuthGuard } from '../auth/guard/jwt-auth.guard';
@@ -46,14 +46,19 @@ export class CompanyController {
   @ApiOperation({ summary: 'Get all companies with optional search and filtering' })
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'category', enum: CompanyCategory, required: false })
+  @ApiQuery({ name: 'approvalStatus', enum: ApprovalStatus, required: false })
   // No pipe needed here if you aren't validating the query object strictly, 
   // but if you do use a Query DTO, use ZodValidationPipe
   findAll(
     @Query('search') search?: string,
     @Query('category') category?: CompanyCategory,
+    @Query('approvalStatus') approvalStatus?: ApprovalStatus,
     @Request() req?,
   ) {
-    return this.companyService.findAll({ search, category }, req.user);
+    return this.companyService.findAll(
+      { search, category, approvalStatus },
+      req.user,
+    );
   }
 
   // ==========================

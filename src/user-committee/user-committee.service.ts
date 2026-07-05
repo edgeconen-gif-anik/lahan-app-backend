@@ -98,7 +98,7 @@ export class UserCommitteeService {
   }
 
   async findAll(query: QueryUserCommitteeDto, user: AuthUser) {
-    const { search, fiscalYear, page, limit } = query;
+    const { search, fiscalYear, approvalStatus, page, limit } = query;
     const skip = (page - 1) * limit;
     const fiscalYearVariants = getFiscalYearVariants(fiscalYear);
 
@@ -124,6 +124,7 @@ export class UserCommitteeService {
         fiscalYearVariants.length
           ? { fiscalYear: { in: fiscalYearVariants } }
           : {},
+        approvalStatus ? { approvalStatus } : {},
       ],
     };
 

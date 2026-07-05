@@ -511,6 +511,7 @@ export class ContractService {
       // Use GET /contracts?siteInchargeId=<uuid> to list all contracts for a user.
       siteInchargeId?: string;
       fiscalYear?: string;
+      approvalStatus?: ApprovalStatus;
     },
     user: AuthUser,
   ) {
@@ -521,6 +522,7 @@ export class ContractService {
       userId,
       siteInchargeId,
       fiscalYear,
+      approvalStatus,
     } = params;
     const fiscalYearVariants = getFiscalYearVariants(fiscalYear);
 
@@ -544,6 +546,7 @@ export class ContractService {
         ...(userCommitteeId && { userCommitteeId }),
         ...(userId && { userID: userId }), // schema field is userID
         ...(siteInchargeId && { siteInchargeId }), // ✅ direct field on Contract
+        ...(approvalStatus && { approvalStatus }),
       },
       include: CONTRACT_INCLUDE,
       orderBy: { createdAt: 'desc' },
