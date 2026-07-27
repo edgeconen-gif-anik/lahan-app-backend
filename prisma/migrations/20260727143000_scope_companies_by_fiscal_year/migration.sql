@@ -1,9 +1,19 @@
-ALTER TABLE "Company" ADD COLUMN "fiscalYear" TEXT;
+BEGIN;
+
+-- This migration may be retried after a failed deployment. The column and
+-- legacy indexes are therefore handled idempotently.
+ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "fiscalYear" TEXT;
 
 DROP INDEX IF EXISTS "Company_panNumber_key";
 DROP INDEX IF EXISTS "Company_email_key";
 DROP INDEX IF EXISTS "Company_officeRegistrationNumber_key";
+DROP INDEX IF EXISTS "Company_fiscalYear_idx";
+DROP INDEX IF EXISTS "Company_panNumber_fiscalYear_key";
+DROP INDEX IF EXISTS "Company_email_fiscalYear_key";
+DROP INDEX IF EXISTS "Company_officeRegistrationNumber_fiscalYear_key";
 
+-- Keep the map for the whole explicit transaction. Without BEGIN/COMMIT,
+-- ON COMMIT DROP removes the table before Prisma executes the next statement.
 CREATE TEMP TABLE "CompanyFiscalYearMap" ON COMMIT DROP AS
 WITH "RelatedFiscalYears" AS (
     SELECT DISTINCT
@@ -125,7 +135,8 @@ JOIN "Company"
     ON "Company"."id" = "CompanyFiscalYearMap"."originalCompanyId"
 WHERE
     "CompanyFiscalYearMap"."mappedCompanyId" <>
-        "CompanyFiscalYearMap"."originalCompanyId";
+        "CompanyFiscalYearMap"."originalCompanyId"
+ON CONFLICT ("id") DO NOTHING;
 
 UPDATE "Project"
 SET "companyId" = "CompanyFiscalYearMap"."mappedCompanyId"
@@ -161,3 +172,5 @@ CREATE UNIQUE INDEX "Company_email_fiscalYear_key"
     ON "Company"("email", "fiscalYear");
 CREATE UNIQUE INDEX "Company_officeRegistrationNumber_fiscalYear_key"
     ON "Company"("officeRegistrationNumber", "fiscalYear");
+
+COMMIT;

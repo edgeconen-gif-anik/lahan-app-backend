@@ -7,19 +7,19 @@ datasource db {
 }
 
 model User {
-  id            String       @id @default(uuid())
-  name          String?
-  email         String?      @unique
-  role          Role?
-  designation   Designation?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  emailVerified DateTime?
-  image         String?
-  password      String?
+  id             String         @id @default(uuid())
+  name           String?
+  email          String?        @unique
+  role           Role?
+  designation    Designation?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  emailVerified  DateTime?
+  image          String?
+  password       String?
   approvalStatus ApprovalStatus @default(APPROVED)
-  accounts      Account[]
-  sessions      Session[]
+  accounts       Account[]
+  sessions       Session[]
 
   // User as a committee representative on a contract (the old `userID` relation)
   contracts Contract[] @relation("ContractCommitteeRep")
@@ -97,12 +97,12 @@ model Company {
   contracts                Contract[]
   projects                 Project[]
 
-  @@index([name])
-  @@index([panNumber])
-  @@index([fiscalYear])
   @@unique([panNumber, fiscalYear])
   @@unique([email, fiscalYear])
   @@unique([officeRegistrationNumber, fiscalYear])
+  @@index([name])
+  @@index([panNumber])
+  @@index([fiscalYear])
 }
 
 model UserCommittee {
@@ -256,6 +256,11 @@ model SystemSetting {
   registrationOfficerDesignation String?
   createdAt                      DateTime @default(now())
   updatedAt                      DateTime @updatedAt
+}
+
+model FiscalYear {
+  value     String   @id
+  createdAt DateTime @default(now())
 }
 
 // System-wide setup values are kept in one singleton row.
