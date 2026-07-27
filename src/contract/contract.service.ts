@@ -24,6 +24,7 @@ import {
 } from '../auth/auth-user';
 import { SetupService } from '../setup/setup.service';
 import {
+  getCurrentNepaliFiscalYear,
   getFiscalYearVariants,
   normalizeFiscalYear,
 } from '../setup/fiscal-year';
@@ -163,6 +164,20 @@ export class ContractService {
     private readonly setupService?: SetupService,
   ) {}
 
+  private async resolveFiscalYearFilter(value?: string | null) {
+    if (value?.trim().toLowerCase() === 'all') {
+      return [];
+    }
+
+    const rawFiscalYear =
+      value?.trim() ||
+      (await this.setupService?.getCurrentFiscalYear()) ||
+      getCurrentNepaliFiscalYear();
+    return getFiscalYearVariants(
+      normalizeFiscalYear(rawFiscalYear) ?? rawFiscalYear,
+    );
+  }
+
   private validateMilestoneChange(input: {
     currentStatus: ContractStatus;
     nextStatus: ContractStatus;
@@ -265,6 +280,43 @@ export class ContractService {
     }
 
     return normalizeFiscalYear(project.fiscalYear) ?? project.fiscalYear;
+  }
+
+  private async validateImplementorFiscalYear(
+    fiscalYear: string,
+    companyId?: string | null,
+    userCommitteeId?: string | null,
+  ) {
+    const fiscalYearVariants = getFiscalYearVariants(fiscalYear);
+    const [company, committee] = await Promise.all([
+      companyId
+        ? this.prisma.company.findFirst({
+            where: { id: companyId, fiscalYear: { in: fiscalYearVariants } },
+            select: { id: true },
+          })
+        : null,
+      userCommitteeId
+        ? this.prisma.userCommittee.findFirst({
+            where: {
+              id: userCommitteeId,
+              fiscalYear: { in: fiscalYearVariants },
+            },
+            select: { id: true },
+          })
+        : null,
+    ]);
+
+    if (companyId && !company) {
+      throw new BadRequestException(
+        `The selected company does not belong to fiscal year ${fiscalYear}.`,
+      );
+    }
+
+    if (userCommitteeId && !committee) {
+      throw new BadRequestException(
+        `The selected user committee does not belong to fiscal year ${fiscalYear}.`,
+      );
+    }
   }
 
   private async ensureProjectHasNoOtherContract(
@@ -434,6 +486,11 @@ export class ContractService {
       this.getProjectFiscalYear(rest.projectId),
       this.ensureProjectHasNoOtherContract(rest.projectId),
     ]);
+    await this.validateImplementorFiscalYear(
+      projectFiscalYear,
+      rest.companyId,
+      rest.userCommitteeId,
+    );
     const completionCode =
       nextStatus === ContractStatus.COMPLETED
         ? await this.getNextCompletionCode(
@@ -524,7 +581,7 @@ export class ContractService {
       fiscalYear,
       approvalStatus,
     } = params;
-    const fiscalYearVariants = getFiscalYearVariants(fiscalYear);
+    const fiscalYearVariants = await this.resolveFiscalYearFilter(fiscalYear);
 
     return this.prisma.contract.findMany({
       where: {
@@ -568,6 +625,8 @@ export class ContractService {
       select: {
         id: true,
         projectId: true,
+        companyId: true,
+        userCommitteeId: true,
         fiscalYear: true,
         status: true,
         startDate: true,
@@ -623,6 +682,11 @@ export class ContractService {
       normalizeFiscalYear(existingContract.fiscalYear) ??
       existingContract.fiscalYear ??
       existingContract.project?.fiscalYear;
+    await this.validateImplementorFiscalYear(
+      effectiveFiscalYear,
+      rest.companyId ?? existingContract.companyId,
+      rest.userCommitteeId ?? existingContract.userCommitteeId,
+    );
 
     if (isStatusUpdate && nextStatus) {
       requireAdminUser(

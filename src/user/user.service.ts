@@ -17,6 +17,7 @@ import { ApprovalStatus, FuelType, Prisma } from '@prisma/client';
 import { AuthUser, isAdminUser, requireAdminUser } from '../auth/auth-user';
 import {
   getCurrentNepaliFiscalYear,
+  getFiscalYearVariants,
   normalizeFiscalYear,
 } from '../setup/fiscal-year';
 
@@ -417,6 +418,20 @@ export class UserService {
   async getUserDashboard(userId: string, requester: AuthUser) {
     this.requireSelfOrAdmin(userId, requester);
     const approvedContractWhere = this.getApprovedContractWhere(requester);
+    const settings = await this.prisma.systemSetting.findUnique({
+      where: { id: 'default' },
+      select: { currentFiscalYear: true },
+    });
+    const currentFiscalYear =
+      normalizeFiscalYear(settings?.currentFiscalYear) ??
+      getCurrentNepaliFiscalYear();
+    const fiscalYearVariants = getFiscalYearVariants(currentFiscalYear);
+    const projectFiscalYearWhere: Prisma.ProjectWhereInput = {
+      fiscalYear: { in: fiscalYearVariants },
+    };
+    const contractFiscalYearWhere: Prisma.ContractWhereInput = {
+      fiscalYear: { in: fiscalYearVariants },
+    };
 
     const [
       user,
@@ -436,10 +451,11 @@ export class UserService {
           email:       true,
           _count: {
             select: {
-              siteInchargeProjects: true,
+              siteInchargeProjects: { where: projectFiscalYearWhere },
             },
           },
           siteInchargeProjects: {
+            where: projectFiscalYearWhere,
             take:    5,
             orderBy: { updatedAt: 'desc' as const },
             select: {
@@ -451,7 +467,10 @@ export class UserService {
             },
           },
           managedContracts: {
-            where: approvedContractWhere,
+            where: {
+              ...approvedContractWhere,
+              ...contractFiscalYearWhere,
+            },
             take:    5,
             orderBy: { updatedAt: 'desc' as const },
             select: {
@@ -468,15 +487,18 @@ export class UserService {
         where: {
           siteInchargeId: userId,
           ...approvedContractWhere,
+          ...contractFiscalYearWhere,
         },
       }),
       this.prisma.project.groupBy({
         by: ['status'],
+        where: projectFiscalYearWhere,
         orderBy: { status: 'asc' as const },
         _count: true,
       }),
-      this.prisma.project.count(),
+      this.prisma.project.count({ where: projectFiscalYearWhere }),
       this.prisma.project.aggregate({
+        where: projectFiscalYearWhere,
         _sum: {
           allocatedBudget: true,
           internalBudget: true,
@@ -485,7 +507,7 @@ export class UserService {
         },
       }),
       this.prisma.project.findMany({
-        where: { status: 'COMPLETED' },
+        where: { status: 'COMPLETED', ...projectFiscalYearWhere },
         take: 6,
         orderBy: { updatedAt: 'desc' as const },
         select: {
@@ -518,14 +540,16 @@ export class UserService {
           designation: true,
           image: true,
           siteInchargeProjects: {
+            where: projectFiscalYearWhere,
             select: { id: true },
           },
           managedContracts: {
+            where: contractFiscalYearWhere,
             select: { projectId: true },
           },
           _count: {
             select: {
-              managedContracts: true,
+              managedContracts: { where: contractFiscalYearWhere },
             },
           },
         },

@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -33,6 +34,14 @@ export class UserCommitteeService {
     const rawFiscalYear =
       value?.trim() || (await this.setupService.getCurrentFiscalYear());
     return normalizeFiscalYear(rawFiscalYear) ?? rawFiscalYear;
+  }
+
+  private async resolveFiscalYearFilter(value?: string | null) {
+    if (value?.trim().toLowerCase() === 'all') {
+      return [];
+    }
+
+    return getFiscalYearVariants(await this.resolveFiscalYear(value));
   }
 
   private validateLeadershipRoles(
@@ -100,7 +109,7 @@ export class UserCommitteeService {
   async findAll(query: QueryUserCommitteeDto, user: AuthUser) {
     const { search, fiscalYear, approvalStatus, page, limit } = query;
     const skip = (page - 1) * limit;
-    const fiscalYearVariants = getFiscalYearVariants(fiscalYear);
+    const fiscalYearVariants = await this.resolveFiscalYearFilter(fiscalYear);
 
     const where: Prisma.UserCommitteeWhereInput = {
       AND: [
@@ -180,6 +189,34 @@ export class UserCommitteeService {
       rest.fiscalYear === undefined
         ? undefined
         : await this.resolveFiscalYear(rest.fiscalYear);
+
+    if (fiscalYear) {
+      const fiscalYearVariants = getFiscalYearVariants(fiscalYear);
+      const mismatchedLink = await this.prisma.userCommittee.findFirst({
+        where: {
+          id,
+          OR: [
+            {
+              projects: {
+                some: { fiscalYear: { notIn: fiscalYearVariants } },
+              },
+            },
+            {
+              contracts: {
+                some: { fiscalYear: { notIn: fiscalYearVariants } },
+              },
+            },
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (mismatchedLink) {
+        throw new ConflictException(
+          'Committee fiscal year cannot be changed while it is linked to projects or contracts from another fiscal year.',
+        );
+      }
+    }
 
     if (officials) {
       this.validateLeadershipRoles(officials);

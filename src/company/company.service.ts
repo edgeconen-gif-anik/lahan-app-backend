@@ -11,10 +11,32 @@ import {
   getApprovalStateForSave,
   requireAdminUser,
 } from '../auth/auth-user';
+import { SetupService } from '../setup/setup.service';
+import {
+  getFiscalYearVariants,
+  normalizeFiscalYear,
+} from '../setup/fiscal-year';
 
 @Injectable()
 export class CompanyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly setupService: SetupService,
+  ) {}
+
+  private async resolveFiscalYear(value?: string | null) {
+    const rawFiscalYear =
+      value?.trim() || (await this.setupService.getCurrentFiscalYear());
+    return normalizeFiscalYear(rawFiscalYear) ?? rawFiscalYear;
+  }
+
+  private async resolveFiscalYearFilter(value?: string | null) {
+    if (value?.trim().toLowerCase() === 'all') {
+      return [];
+    }
+
+    return getFiscalYearVariants(await this.resolveFiscalYear(value));
+  }
 
   private normalizeCompanyData<T extends { officeRegistrationNumber?: string | null }>(
     data: T,
@@ -40,11 +62,13 @@ export class CompanyService {
 
   async create(data: CreateCompanyDto, user: AuthUser) {
     const createData = this.withoutOfficeRegistrationNumber(data);
+    const fiscalYear = await this.resolveFiscalYear(createData.fiscalYear);
 
     try {
       return await this.prisma.company.create({
         data: {
           ...createData,
+          fiscalYear,
           ...getApprovalStateForSave(user),
         },
       });
@@ -81,12 +105,18 @@ export class CompanyService {
     params: {
       search?: string;
       category?: CompanyCategory;
+      fiscalYear?: string;
       approvalStatus?: ApprovalStatus;
     },
     _user: AuthUser,
   ) {
-    const { search, category, approvalStatus } = params;
-    const where: Prisma.CompanyWhereInput = {};
+    const { search, category, fiscalYear, approvalStatus } = params;
+    const fiscalYearVariants = await this.resolveFiscalYearFilter(fiscalYear);
+    const where: Prisma.CompanyWhereInput = {
+      ...(fiscalYearVariants.length && {
+        fiscalYear: { in: fiscalYearVariants },
+      }),
+    };
 
     if (search) {
       const isNumber = !isNaN(Number(search));
@@ -116,14 +146,53 @@ export class CompanyService {
   }
 
   async update(id: string, data: UpdateCompanyDto, user: AuthUser) {
-    await this.findOne(id, user);
+    const existingCompany = await this.findOne(id, user);
     const updateData = this.normalizeCompanyData(data);
+    const fiscalYear =
+      updateData.fiscalYear === undefined
+        ? undefined
+        : await this.resolveFiscalYear(updateData.fiscalYear);
+
+    if (
+      fiscalYear &&
+      !getFiscalYearVariants(fiscalYear).includes(existingCompany.fiscalYear)
+    ) {
+      const linkedRecord = await this.prisma.company.findFirst({
+        where: {
+          id,
+          OR: [
+            {
+              projects: {
+                some: {
+                  fiscalYear: { notIn: getFiscalYearVariants(fiscalYear) },
+                },
+              },
+            },
+            {
+              contracts: {
+                some: {
+                  fiscalYear: { notIn: getFiscalYearVariants(fiscalYear) },
+                },
+              },
+            },
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (linkedRecord) {
+        throw new ConflictException(
+          'Company fiscal year cannot be changed while it is linked to projects or contracts from another fiscal year.',
+        );
+      }
+    }
 
     try {
       return await this.prisma.company.update({
         where: { id },
         data: {
           ...updateData,
+          fiscalYear,
           ...getApprovalStateForSave(user),
         },
       });

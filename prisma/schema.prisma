@@ -76,11 +76,12 @@ model VerificationToken {
 model Company {
   id                       String           @id @default(uuid())
   name                     String
-  panNumber                Int              @unique
+  panNumber                Int
+  fiscalYear               String
   address                  String
   contactPerson            String?
   phoneNumber              String?
-  email                    String?          @unique
+  email                    String?
   registrationRequestDate  DateTime?
   registrationDate         DateTime?
   category                 CompanyCategory?
@@ -92,12 +93,16 @@ model Company {
   createdAt                DateTime         @default(now())
   updatedAt                DateTime         @updatedAt
   voucherNo                String?
-  officeRegistrationNumber String?          @unique
+  officeRegistrationNumber String?
   contracts                Contract[]
   projects                 Project[]
 
   @@index([name])
   @@index([panNumber])
+  @@index([fiscalYear])
+  @@unique([panNumber, fiscalYear])
+  @@unique([email, fiscalYear])
+  @@unique([officeRegistrationNumber, fiscalYear])
 }
 
 model UserCommittee {

@@ -6,6 +6,11 @@ import { CompanyCategory } from '@prisma/client';
 // 1. Define the base Zod Schema
 export const CompanySchema = z.object({
   name: z.string().min(1, 'Name is required').describe('Official Name of the company'),
+  fiscalYear: z
+    .string()
+    .regex(/^\d{4}\s*[/-]\s*\d{2,3}$/, 'Must be format like 2082/083')
+    .optional()
+    .or(z.literal('')),
   
   // PAN is an Int in your DB, but usually 9 digits
   panNumber: z.coerce // coerce ensures string inputs are treated as numbers if needed

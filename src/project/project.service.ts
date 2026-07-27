@@ -167,12 +167,72 @@ export class ProjectService {
     return normalizeFiscalYear(rawFiscalYear) ?? rawFiscalYear;
   }
 
+  private async resolveFiscalYearFilter(value?: string | null) {
+    if (value?.trim().toLowerCase() === 'all') {
+      return [];
+    }
+
+    return getFiscalYearVariants(await this.resolveFiscalYear(value));
+  }
+
+  private async validateFiscalYearRelations(
+    fiscalYear: string,
+    companyId?: string | null,
+    userCommitteeId?: string | null,
+  ) {
+    const fiscalYearVariants = getFiscalYearVariants(fiscalYear);
+
+    const [company, committee] = await Promise.all([
+      companyId
+        ? this.prisma.company.findFirst({
+            where: { id: companyId, fiscalYear: { in: fiscalYearVariants } },
+            select: { id: true },
+          })
+        : null,
+      userCommitteeId
+        ? this.prisma.userCommittee.findFirst({
+            where: {
+              id: userCommitteeId,
+              fiscalYear: { in: fiscalYearVariants },
+            },
+            select: { id: true },
+          })
+        : null,
+    ]);
+
+    if (companyId && !company) {
+      throw new BadRequestException(
+        `The selected company does not belong to fiscal year ${fiscalYear}.`,
+      );
+    }
+
+    if (userCommitteeId && !committee) {
+      throw new BadRequestException(
+        `The selected user committee does not belong to fiscal year ${fiscalYear}.`,
+      );
+    }
+  }
+
   async create(dto: CreateProjectDto, user: AuthUser) {
     requireAdminUser(user);
 
     const data = CreateProjectSchema.parse(dto);
     const fiscalYear = await this.resolveFiscalYear(data.fiscalYear);
     const implantedThrough = mapImplantedThrough(data.implantedThrough);
+    const companyId =
+      implantedThrough === ProjectImplantedThrough.COMP
+        ? data.companyId
+        : null;
+    const userCommitteeId =
+      implantedThrough === ProjectImplantedThrough.USER_COMMITTEE
+        ? data.userCommitteeId
+        : null;
+
+    await this.validateFiscalYearRelations(
+      fiscalYear,
+      companyId,
+      userCommitteeId,
+    );
 
     const duplicate = await this.prisma.project.findFirst({
       where: {
@@ -193,14 +253,8 @@ export class ProjectService {
       ...data,
       fiscalYear,
       implantedThrough,
-      companyId:
-        implantedThrough === ProjectImplantedThrough.COMP
-          ? data.companyId
-          : null,
-      userCommitteeId:
-        implantedThrough === ProjectImplantedThrough.USER_COMMITTEE
-          ? data.userCommitteeId
-          : null,
+      companyId,
+      userCommitteeId,
       allocatedBudget: safeDecimal(data.allocatedBudget),
       internalBudget: safeDecimal(data.internalBudget),
       centralBudget: safeDecimal(data.centralBudget),
@@ -214,7 +268,7 @@ export class ProjectService {
   async findAll(query: QueryProjectDto, user: AuthUser) {
     const q = QueryProjectSchema.parse(query);
     const skip = (q.page - 1) * q.limit;
-    const fiscalYearVariants = getFiscalYearVariants(q.fiscalYear);
+    const fiscalYearVariants = await this.resolveFiscalYearFilter(q.fiscalYear);
 
     const where: Prisma.ProjectWhereInput = {
       ...(q.status && { status: q.status }),
@@ -303,6 +357,26 @@ export class ProjectService {
     requireAdminUser(user);
 
     const data = UpdateProjectSchema.parse(dto);
+    const existingProject = await this.prisma.project.findUnique({
+      where: { id },
+      select: {
+        fiscalYear: true,
+        implantedThrough: true,
+        companyId: true,
+        userCommitteeId: true,
+        contracts: {
+          select: {
+            company: { select: { fiscalYear: true } },
+            userCommittee: { select: { fiscalYear: true } },
+          },
+        },
+      },
+    });
+
+    if (!existingProject) {
+      throw new NotFoundException('Project not found');
+    }
+
     const fiscalYear =
       data.fiscalYear === undefined
         ? undefined
@@ -319,6 +393,51 @@ export class ProjectService {
           : implantedThrough === ProjectImplantedThrough.USER_COMMITTEE
             ? { companyId: null, userCommitteeId: data.userCommitteeId ?? null }
             : { companyId: null, userCommitteeId: null };
+    const effectiveFiscalYear = fiscalYear ?? existingProject.fiscalYear;
+    const effectiveImplantedThrough =
+      implantedThrough === undefined
+        ? existingProject.implantedThrough
+        : implantedThrough;
+    const effectiveCompanyId =
+      effectiveImplantedThrough === ProjectImplantedThrough.COMP
+        ? shouldUpdateImplementation
+          ? (data.companyId ?? null)
+          : data.companyId !== undefined
+            ? data.companyId
+            : existingProject.companyId
+        : null;
+    const effectiveUserCommitteeId =
+      effectiveImplantedThrough === ProjectImplantedThrough.USER_COMMITTEE
+        ? shouldUpdateImplementation
+          ? (data.userCommitteeId ?? null)
+          : data.userCommitteeId !== undefined
+            ? data.userCommitteeId
+            : existingProject.userCommitteeId
+        : null;
+
+    await this.validateFiscalYearRelations(
+      effectiveFiscalYear,
+      effectiveCompanyId,
+      effectiveUserCommitteeId,
+    );
+
+    const effectiveFiscalYearVariants =
+      getFiscalYearVariants(effectiveFiscalYear);
+    const hasMismatchedContractRelation = existingProject.contracts.some(
+      (contract) =>
+        (contract.company &&
+          !effectiveFiscalYearVariants.includes(contract.company.fiscalYear)) ||
+        (contract.userCommittee &&
+          !effectiveFiscalYearVariants.includes(
+            contract.userCommittee.fiscalYear,
+          )),
+    );
+
+    if (hasMismatchedContractRelation) {
+      throw new ConflictException(
+        'Project fiscal year cannot be changed because a linked contract uses an implementor from another fiscal year.',
+      );
+    }
 
     try {
       const payload: Prisma.ProjectUncheckedUpdateInput = {
@@ -344,9 +463,20 @@ export class ProjectService {
             : undefined,
       };
 
-      const project = await this.prisma.project.update({
-        where: { id },
-        data: payload,
+      const project = await this.prisma.$transaction(async (tx) => {
+        const updatedProject = await tx.project.update({
+          where: { id },
+          data: payload,
+        });
+
+        if (fiscalYear) {
+          await tx.contract.updateMany({
+            where: { projectId: id },
+            data: { fiscalYear },
+          });
+        }
+
+        return updatedProject;
       });
 
       return mapProject(project);

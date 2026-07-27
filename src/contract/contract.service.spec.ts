@@ -23,6 +23,12 @@ describe('ContractService', () => {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    company: {
+      findFirst: jest.fn(),
+    },
+    userCommittee: {
+      findFirst: jest.fn(),
+    },
     agreement: {
       deleteMany: jest.fn(),
     },
@@ -37,6 +43,8 @@ describe('ContractService', () => {
     prisma.project.findUnique.mockResolvedValue({ fiscalYear: '2082/083' });
     prisma.project.update.mockResolvedValue({});
     prisma.project.updateMany.mockResolvedValue({ count: 0 });
+    prisma.company.findFirst.mockResolvedValue({ id: 'company-1' });
+    prisma.userCommittee.findFirst.mockResolvedValue({ id: 'committee-1' });
     prisma.$transaction.mockImplementation((callback) => callback(prisma));
   });
 

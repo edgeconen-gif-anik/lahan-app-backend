@@ -79,9 +79,14 @@ export class SetupService {
   }
 
   async listFiscalYears() {
-    const [settings, projectYears, committeeYears, contractYears] =
+    const [settings, companyYears, projectYears, committeeYears, contractYears] =
       await Promise.all([
         this.getSettings(),
+        this.prisma.company.findMany({
+          distinct: ['fiscalYear'],
+          select: { fiscalYear: true },
+          where: { fiscalYear: { not: '' } },
+        }),
         this.prisma.project.findMany({
           distinct: ['fiscalYear'],
           select: { fiscalYear: true },
@@ -104,6 +109,7 @@ export class SetupService {
 
     for (const record of [
       ...projectYears,
+      ...companyYears,
       ...committeeYears,
       ...contractYears,
     ]) {

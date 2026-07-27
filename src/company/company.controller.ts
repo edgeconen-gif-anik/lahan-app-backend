@@ -46,17 +46,19 @@ export class CompanyController {
   @ApiOperation({ summary: 'Get all companies with optional search and filtering' })
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'category', enum: CompanyCategory, required: false })
+  @ApiQuery({ name: 'fiscalYear', required: false })
   @ApiQuery({ name: 'approvalStatus', enum: ApprovalStatus, required: false })
   // No pipe needed here if you aren't validating the query object strictly, 
   // but if you do use a Query DTO, use ZodValidationPipe
   findAll(
     @Query('search') search?: string,
     @Query('category') category?: CompanyCategory,
+    @Query('fiscalYear') fiscalYear?: string,
     @Query('approvalStatus') approvalStatus?: ApprovalStatus,
     @Request() req?,
   ) {
     return this.companyService.findAll(
-      { search, category, approvalStatus },
+      { search, category, fiscalYear, approvalStatus },
       req.user,
     );
   }
