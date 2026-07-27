@@ -50,6 +50,12 @@ export class SetupService {
           dto.chiefAdministrativeOfficerName,
         ),
         sectionChiefName: cleanOptionalText(dto.sectionChiefName),
+        registrationOfficerName: cleanOptionalText(
+          dto.registrationOfficerName,
+        ),
+        registrationOfficerDesignation: cleanOptionalText(
+          dto.registrationOfficerDesignation,
+        ),
       },
       update: {
         currentFiscalYear: normalizedFiscalYear,
@@ -57,6 +63,12 @@ export class SetupService {
           dto.chiefAdministrativeOfficerName,
         ),
         sectionChiefName: cleanOptionalText(dto.sectionChiefName),
+        registrationOfficerName: cleanOptionalText(
+          dto.registrationOfficerName,
+        ),
+        registrationOfficerDesignation: cleanOptionalText(
+          dto.registrationOfficerDesignation,
+        ),
       },
     });
   }

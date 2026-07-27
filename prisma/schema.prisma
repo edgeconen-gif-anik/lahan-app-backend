@@ -247,6 +247,8 @@ model SystemSetting {
   currentFiscalYear              String
   chiefAdministrativeOfficerName String?
   sectionChiefName               String?
+  registrationOfficerName        String?
+  registrationOfficerDesignation String?
   createdAt                      DateTime @default(now())
   updatedAt                      DateTime @updatedAt
 }
