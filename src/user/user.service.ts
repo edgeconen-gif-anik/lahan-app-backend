@@ -828,7 +828,25 @@ export class UserService {
       }
     }
 
-    return this.prisma.user.delete({ where: { id } });
+    try {
+      return await this.prisma.user.delete({ where: { id } });
+    } catch (error) {
+      const prismaErrorCode =
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        typeof error.code === 'string'
+          ? error.code
+          : undefined;
+
+      if (prismaErrorCode === 'P2003') {
+        throw new ConflictException(
+          'This user cannot be deleted while assigned to projects, contracts, or fuel records. Reassign those records first.',
+        );
+      }
+
+      throw error;
+    }
   }
 
   /* ───────────────────────────────────────────

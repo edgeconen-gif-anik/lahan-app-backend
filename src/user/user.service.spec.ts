@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { ApprovalStatus, Designation, Role } from '@prisma/client';
 import { UserService } from './user.service';
 
@@ -10,6 +10,7 @@ describe('UserService', () => {
       create: jest.fn(),
       update: jest.fn(),
       count: jest.fn(),
+      delete: jest.fn(),
     },
   };
   const admin = {
@@ -119,5 +120,41 @@ describe('UserService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
 
     expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('allows a super admin to delete an unassigned user', async () => {
+    prisma.user.findUnique.mockResolvedValue({ role: Role.CREATOR });
+    prisma.user.delete.mockResolvedValue({ id: 'creator-1' });
+
+    await expect(service.remove('creator-1', superAdmin)).resolves.toEqual({
+      id: 'creator-1',
+    });
+
+    expect(prisma.user.delete).toHaveBeenCalledWith({
+      where: { id: 'creator-1' },
+    });
+  });
+
+  it('prevents a super admin from deleting their own account', async () => {
+    await expect(
+      service.remove(superAdmin.id, superAdmin),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.user.delete).not.toHaveBeenCalled();
+  });
+
+  it('explains when assigned records prevent user deletion', async () => {
+    prisma.user.findUnique.mockResolvedValue({ role: Role.CREATOR });
+    prisma.user.delete.mockRejectedValue({ code: 'P2003' });
+
+    try {
+      await service.remove('assigned-user', superAdmin);
+      throw new Error('Expected deletion to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as Error).message).toContain(
+        'Reassign those records first',
+      );
+    }
   });
 });
