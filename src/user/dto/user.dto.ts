@@ -10,11 +10,7 @@ const DesignationEnum = z.enum([
   'ENGINEER',
 ]);
 
-const RoleEnum = z.enum([
-  'CREATOR', 
-  'REVIEWER', 
-  'ADMIN'
-]);
+const RoleEnum = z.enum(['CREATOR', 'REVIEWER', 'ADMIN', 'SUPER_ADMIN']);
 
 const ApprovalStatusEnum = z.enum(['PENDING', 'APPROVED', 'REJECTED']);
 
@@ -23,28 +19,31 @@ const ApprovalStatusEnum = z.enum(['PENDING', 'APPROVED', 'REJECTED']);
 // ==========================================
 export const CreateUserSchema = z.object({
   // Name is now optional in DB (String?) to support initial Google logins
-  name: z.string()
+  name: z
+    .string()
     .min(3, 'Name must be at least 3 characters')
     .max(100)
     .optional(),
 
   // Email is technically optional in DB, but required for manual creation
-  email: z.string()
+  email: z
+    .string()
     .email('Invalid email address')
     .transform((e) => e.toLowerCase()),
 
   // NEW: Password field for Credentials login
   // Optional because Google users won't provide one
-  password: z.string()
+  password: z
+    .string()
     .min(6, 'Password must be at least 6 characters')
     .optional(),
 
   // UPDATED: Now optional because new Google users won't have a designation yet
   designation: DesignationEnum.optional(),
 
-  // UPDATED: Now optional. 
+  // UPDATED: Now optional.
   // You can keep the default if you want new manual users to be CREATORs automatically
-  role: RoleEnum.optional().default('CREATOR'), 
+  role: RoleEnum.optional().default('CREATOR'),
 
   approvalStatus: ApprovalStatusEnum.optional(),
 });

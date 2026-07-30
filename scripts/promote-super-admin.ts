@@ -7,7 +7,7 @@ async function main() {
   const email = process.argv[2]?.trim().toLowerCase();
 
   if (!email) {
-    console.error('Usage: npm run admin:promote -- user@example.com');
+    console.error('Usage: npm run super-admin:promote -- user@example.com');
     process.exit(1);
   }
 
@@ -25,21 +25,23 @@ async function main() {
       process.exit(1);
     }
 
-    if (existingUser.role === Role.SUPER_ADMIN) {
-      console.error(
-        'Refusing to demote a super admin. Use the protected user-management flow instead.',
-      );
-      process.exit(1);
-    }
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { email },
+        data: {
+          role: Role.SUPER_ADMIN,
+          approvalStatus: 'APPROVED',
+        },
+        select: { id: true, email: true, role: true, name: true },
+      });
 
-    const updatedUser = await prisma.user.update({
-      where: { email },
-      data: { role: Role.ADMIN },
-      select: { id: true, email: true, role: true, name: true },
+      await tx.session.deleteMany({ where: { userId: user.id } });
+      return user;
     });
 
-    console.log('Admin role granted successfully:');
+    console.log('Super admin role granted successfully:');
     console.log(updatedUser);
+    console.log('Existing sessions were revoked; the user must sign in again.');
   } finally {
     await prisma.$disconnect();
     await pool.end();
@@ -47,6 +49,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('Failed to promote user to admin:', error);
+  console.error('Failed to promote user to super admin:', error);
   process.exit(1);
 });

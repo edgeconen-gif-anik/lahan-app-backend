@@ -329,6 +329,7 @@ enum Role {
   CREATOR
   REVIEWER
   ADMIN
+  SUPER_ADMIN
 }
 
 enum Designation {

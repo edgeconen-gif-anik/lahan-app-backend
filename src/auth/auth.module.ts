@@ -7,7 +7,8 @@ import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './strategy/jwt.strategy';
 import { AUTH_ACCESS_TOKEN_MAX_AGE } from './session-config';
 import { MailModule } from '../mail/mail.module';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
+import { getJwtSecret } from './jwt-secret';
 
 @Module({
   imports: [
@@ -16,12 +17,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        secret:
-          configService.get<string>('JWT_SECRET') ||
-          configService.get<string>('JWT_SECRET_KEY') ||
-          'secretKey',
+      useFactory: () => ({
+        secret: getJwtSecret(),
         signOptions: { expiresIn: AUTH_ACCESS_TOKEN_MAX_AGE },
       }),
     }),

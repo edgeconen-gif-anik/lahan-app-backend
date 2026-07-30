@@ -13,8 +13,14 @@ import {
   QueryUserDto,
 } from './dto/user.dto';
 import * as bcrypt from 'bcrypt';
-import { ApprovalStatus, FuelType, Prisma } from '@prisma/client';
-import { AuthUser, isAdminUser, requireAdminUser } from '../auth/auth-user';
+import { ApprovalStatus, FuelType, Prisma, Role } from '@prisma/client';
+import {
+  AuthUser,
+  isAdminUser,
+  isSuperAdminUser,
+  requireAdminUser,
+  requireSuperAdminUser,
+} from '../auth/auth-user';
 import {
   getCurrentNepaliFiscalYear,
   getFiscalYearVariants,
@@ -35,6 +41,19 @@ const FISCAL_MONTHS = [
   'Jestha',
   'Ashadh',
 ];
+
+const PUBLIC_USER_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  role: true,
+  designation: true,
+  approvalStatus: true,
+  image: true,
+  createdAt: true,
+  updatedAt: true,
+  emailVerified: true,
+} satisfies Prisma.UserSelect;
 
 function toNumber(value: Prisma.Decimal | number | null | undefined) {
   return value == null ? 0 : Number(value);
@@ -70,7 +89,9 @@ export class UserService {
     throw new ForbiddenException('You do not have access to this user');
   }
 
-  private getApprovedContractWhere(requester: AuthUser): Prisma.ContractWhereInput {
+  private getApprovedContractWhere(
+    requester: AuthUser,
+  ): Prisma.ContractWhereInput {
     if (isAdminUser(requester)) {
       return {};
     }
@@ -84,7 +105,16 @@ export class UserService {
      1. Create User
   ─────────────────────────────────────────── */
   async create(createUserDto: CreateUserDto, requester: AuthUser) {
-    requireAdminUser(requester);
+    requireSuperAdminUser(
+      requester,
+      'Only a super admin can create user accounts',
+    );
+
+    if (createUserDto.role === Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Use the operator-only super-admin promotion command to assign this role',
+      );
+    }
 
     const existingUser = await this.prisma.user.findUnique({
       where: { email: createUserDto.email },
@@ -103,7 +133,13 @@ export class UserService {
     const { password, ...userData } = createUserDto;
 
     return this.prisma.user.create({
-      data: { ...userData, password: hashedPassword },
+      data: {
+        ...userData,
+        password: hashedPassword,
+        approvalStatus: ApprovalStatus.APPROVED,
+        emailVerified: new Date(),
+      },
+      select: PUBLIC_USER_SELECT,
     });
   }
 
@@ -121,13 +157,13 @@ export class UserService {
         search
           ? {
               OR: [
-                { name:  { contains: search, mode: 'insensitive' } },
+                { name: { contains: search, mode: 'insensitive' } },
                 { email: { contains: search, mode: 'insensitive' } },
               ],
             }
           : {},
         designation ? { designation } : {},
-        role        ? { role }        : {},
+        role ? { role } : {},
         approvalStatus ? { approvalStatus } : {},
       ],
     };
@@ -137,18 +173,18 @@ export class UserService {
       this.prisma.user.findMany({
         where,
         skip,
-        take:    limit,
+        take: limit,
         orderBy: { createdAt: 'desc' },
         select: {
-          id:            true,
-          name:          true,
-          email:         true,
-          role:          true,
-          designation:   true,
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          designation: true,
           approvalStatus: true,
-          image:         true,
-          createdAt:     true,
-          updatedAt:     true,  // ✅ added
+          image: true,
+          createdAt: true,
+          updatedAt: true, // ✅ added
           emailVerified: true,
         },
       }),
@@ -173,15 +209,15 @@ export class UserService {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
-        id:            true,
-        name:          true,
-        email:         true,
-        role:          true,
-        designation:   true,
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        designation: true,
         approvalStatus: true,
-        image:         true,
-        createdAt:     true,
-        updatedAt:     true,
+        image: true,
+        createdAt: true,
+        updatedAt: true,
         emailVerified: true,
         // never return password
       },
@@ -204,49 +240,51 @@ export class UserService {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
-        id:          true,
-        name:        true,
-        email:       true,
-        role:        true,
+        id: true,
+        name: true,
+        email: true,
+        role: true,
         designation: true,
         approvalStatus: true,
-        image:       true,
-        createdAt:   true,
+        image: true,
+        createdAt: true,
 
         // ✅ Projects where this user is site incharge
         // Relation name from schema: "SiteIncharge"
         siteInchargeProjects: {
           select: {
-            id:              true,
-            name:            true,
-            sNo:             true,
-            status:          true,
-            fiscalYear:      true,
-            budgetCode:      true,
+            id: true,
+            name: true,
+            sNo: true,
+            status: true,
+            fiscalYear: true,
+            budgetCode: true,
             allocatedBudget: true,
-            internalBudget:  true,
-            centralBudget:   true,
-            provinceBudget:  true,
+            internalBudget: true,
+            centralBudget: true,
+            provinceBudget: true,
 
             // All contracts under each project
             contracts: {
               where: approvedContractWhere,
               select: {
-                id:                     true,
-                contractNumber:         true,
-                contractAmount:         true,
-                status:                 true,
-                startDate:              true,
+                id: true,
+                contractNumber: true,
+                contractAmount: true,
+                status: true,
+                startDate: true,
                 intendedCompletionDate: true,
-                actualCompletionDate:   true,
-                remarks:                true,
-                createdAt:              true,
+                actualCompletionDate: true,
+                remarks: true,
+                createdAt: true,
                 // ✅ contract's own site incharge (may differ from project's)
-                siteIncharge:  { select: { id: true, name: true, designation: true } },
-                company:       { select: { id: true, name: true } },
+                siteIncharge: {
+                  select: { id: true, name: true, designation: true },
+                },
+                company: { select: { id: true, name: true } },
                 userCommittee: { select: { id: true, name: true } },
-                agreement:     { select: { id: true, agreementDate: true } },
-                workOrder:     { select: { id: true, issuedDate: true } },
+                agreement: { select: { id: true, agreementDate: true } },
+                workOrder: { select: { id: true, issuedDate: true } },
               },
               orderBy: { createdAt: 'desc' as const },
             },
@@ -259,17 +297,17 @@ export class UserService {
         managedContracts: {
           where: approvedContractWhere,
           select: {
-            id:                     true,
-            contractNumber:         true,
-            contractAmount:         true,
-            status:                 true,
-            startDate:              true,
+            id: true,
+            contractNumber: true,
+            contractAmount: true,
+            status: true,
+            startDate: true,
             intendedCompletionDate: true,
-            actualCompletionDate:   true,
+            actualCompletionDate: true,
             project: {
               select: { id: true, name: true, sNo: true, status: true },
             },
-            company:       { select: { id: true, name: true } },
+            company: { select: { id: true, name: true } },
             userCommittee: { select: { id: true, name: true } },
           },
           orderBy: { createdAt: 'desc' as const },
@@ -368,10 +406,10 @@ export class UserService {
       return {
         ...project,
         allocatedBudget: Number(project.allocatedBudget),
-        internalBudget:  Number(project.internalBudget),
-        centralBudget:   Number(project.centralBudget),
-        provinceBudget:  Number(project.provinceBudget),
-        contractCount:   project.contracts.length,
+        internalBudget: Number(project.internalBudget),
+        centralBudget: Number(project.centralBudget),
+        provinceBudget: Number(project.provinceBudget),
+        contractCount: project.contracts.length,
         totalContractValue,
         statusBreakdown,
       };
@@ -397,17 +435,17 @@ export class UserService {
     };
 
     return {
-      id:          user.id,
-      name:        user.name,
-      email:       user.email,
-      role:        user.role,
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
       designation: user.designation,
-      image:       user.image,
-      createdAt:   user.createdAt,
+      image: user.image,
+      createdAt: user.createdAt,
       summary,
       fuelUsage,
       siteInchargeProjects: projectsWithStats,
-      managedContracts:     user.managedContracts,
+      managedContracts: user.managedContracts,
     };
   }
 
@@ -445,10 +483,10 @@ export class UserService {
       this.prisma.user.findUnique({
         where: { id: userId },
         select: {
-          id:          true,
-          name:        true,
+          id: true,
+          name: true,
           designation: true,
-          email:       true,
+          email: true,
           _count: {
             select: {
               siteInchargeProjects: { where: projectFiscalYearWhere },
@@ -456,14 +494,14 @@ export class UserService {
           },
           siteInchargeProjects: {
             where: projectFiscalYearWhere,
-            take:    5,
+            take: 5,
             orderBy: { updatedAt: 'desc' as const },
             select: {
-              id:              true,
-              name:            true,
-              status:          true,
+              id: true,
+              name: true,
+              status: true,
               allocatedBudget: true,
-              fiscalYear:      true,
+              fiscalYear: true,
             },
           },
           managedContracts: {
@@ -471,13 +509,13 @@ export class UserService {
               ...approvedContractWhere,
               ...contractFiscalYearWhere,
             },
-            take:    5,
+            take: 5,
             orderBy: { updatedAt: 'desc' as const },
             select: {
-              id:             true,
+              id: true,
               contractNumber: true,
               contractAmount: true,
-              status:         true,
+              status: true,
               project: { select: { id: true, name: true } },
             },
           },
@@ -526,7 +564,12 @@ export class UserService {
             orderBy: { updatedAt: 'desc' as const },
             select: {
               siteIncharge: {
-                select: { id: true, name: true, designation: true, image: true },
+                select: {
+                  id: true,
+                  name: true,
+                  designation: true,
+                  image: true,
+                },
               },
             },
           },
@@ -580,10 +623,10 @@ export class UserService {
 
     return {
       userProfile: {
-        id:          user.id,
-        name:        user.name,
+        id: user.id,
+        name: user.name,
         designation: user.designation,
-        email:       user.email,
+        email: user.email,
       },
       stats: {
         totalProjects,
@@ -602,7 +645,7 @@ export class UserService {
         totalSiteInchargeProjects: user._count.siteInchargeProjects,
         totalManagedContracts,
       },
-      recentProjects:  user.siteInchargeProjects.map((p) => ({
+      recentProjects: user.siteInchargeProjects.map((p) => ({
         ...p,
         allocatedBudget: Number(p.allocatedBudget),
       })),
@@ -647,8 +690,42 @@ export class UserService {
      6. Update User
   ─────────────────────────────────────────── */
   async update(id: string, updateUserDto: UpdateUserDto, requester: AuthUser) {
-    requireAdminUser(requester);
-    await this.findOne(id, requester);
+    requireSuperAdminUser(
+      requester,
+      'Only a super admin can update user accounts',
+    );
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true },
+    });
+
+    if (!existingUser) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+
+    if (
+      updateUserDto.role === Role.SUPER_ADMIN &&
+      existingUser.role !== Role.SUPER_ADMIN
+    ) {
+      throw new ForbiddenException(
+        'Use the operator-only super-admin promotion command to assign this role',
+      );
+    }
+
+    if (
+      existingUser.role === Role.SUPER_ADMIN &&
+      updateUserDto.role &&
+      updateUserDto.role !== Role.SUPER_ADMIN
+    ) {
+      const superAdminCount = await this.prisma.user.count({
+        where: { role: Role.SUPER_ADMIN },
+      });
+
+      if (superAdminCount <= 1) {
+        throw new ForbiddenException('The last super admin cannot be demoted');
+      }
+    }
 
     if (updateUserDto.password) {
       updateUserDto.password = await bcrypt.hash(updateUserDto.password, 10);
@@ -656,12 +733,33 @@ export class UserService {
 
     return this.prisma.user.update({
       where: { id },
-      data:  updateUserDto,
+      data: updateUserDto,
+      select: PUBLIC_USER_SELECT,
     });
   }
 
-  async approve(id: string, approveUserDto: ApproveUserDto, requester: AuthUser) {
+  async approve(
+    id: string,
+    approveUserDto: ApproveUserDto,
+    requester: AuthUser,
+  ) {
     requireAdminUser(requester);
+
+    if (
+      (approveUserDto.role === Role.ADMIN ||
+        approveUserDto.role === Role.SUPER_ADMIN) &&
+      !isSuperAdminUser(requester)
+    ) {
+      throw new ForbiddenException(
+        'Only a super admin can assign an administrative role',
+      );
+    }
+
+    if (approveUserDto.role === Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Use the operator-only super-admin promotion command to assign this role',
+      );
+    }
 
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -702,8 +800,34 @@ export class UserService {
      7. Delete User
   ─────────────────────────────────────────── */
   async remove(id: string, requester: AuthUser) {
-    requireAdminUser(requester);
-    await this.findOne(id, requester);
+    requireSuperAdminUser(
+      requester,
+      'Only a super admin can delete user accounts',
+    );
+
+    if (id === requester.id) {
+      throw new ForbiddenException('You cannot delete your own account');
+    }
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { id },
+      select: { role: true },
+    });
+
+    if (!existingUser) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+
+    if (existingUser.role === Role.SUPER_ADMIN) {
+      const superAdminCount = await this.prisma.user.count({
+        where: { role: Role.SUPER_ADMIN },
+      });
+
+      if (superAdminCount <= 1) {
+        throw new ForbiddenException('The last super admin cannot be deleted');
+      }
+    }
+
     return this.prisma.user.delete({ where: { id } });
   }
 

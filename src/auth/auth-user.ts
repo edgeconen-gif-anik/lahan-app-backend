@@ -10,7 +10,11 @@ export type AuthUser = {
 };
 
 export function isAdminUser(user?: Pick<AuthUser, 'role'> | null) {
-  return user?.role === Role.ADMIN;
+  return user?.role === Role.ADMIN || user?.role === Role.SUPER_ADMIN;
+}
+
+export function isSuperAdminUser(user?: Pick<AuthUser, 'role'> | null) {
+  return user?.role === Role.SUPER_ADMIN;
 }
 
 export function requireAdminUser(
@@ -18,6 +22,15 @@ export function requireAdminUser(
   message = 'Admin access is required for this action',
 ) {
   if (!isAdminUser(user)) {
+    throw new ForbiddenException(message);
+  }
+}
+
+export function requireSuperAdminUser(
+  user?: Pick<AuthUser, 'role'> | null,
+  message = 'Super admin access is required for this action',
+) {
+  if (!isSuperAdminUser(user)) {
     throw new ForbiddenException(message);
   }
 }

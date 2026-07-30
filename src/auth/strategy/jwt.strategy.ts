@@ -4,6 +4,8 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AuthUser } from '../auth-user';
 import { PrismaService } from '../../prisma/prisma.service';
 import { getIdleSessionExpiry } from '../session-config';
+import { ApprovalStatus } from '@prisma/client';
+import { getJwtSecret } from '../jwt-secret';
 
 type JwtPayload = {
   sub: string;
@@ -21,8 +23,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey:
-        process.env.JWT_SECRET || process.env.JWT_SECRET_KEY || 'secretKey',
+      secretOrKey: getJwtSecret(),
     });
   }
 
@@ -39,6 +40,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           sessionToken: true,
           userId: true,
           expires: true,
+          user: {
+            select: {
+              email: true,
+              role: true,
+              designation: true,
+              approvalStatus: true,
+            },
+          },
         },
       });
 
@@ -54,6 +63,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         throw new UnauthorizedException('Session expired due to inactivity');
       }
 
+      if (session.user.approvalStatus !== ApprovalStatus.APPROVED) {
+        await this.prisma.session.deleteMany({
+          where: { userId: session.userId },
+        });
+
+        throw new UnauthorizedException('User account is not approved');
+      }
+
       await this.prisma.session.update({
         where: { sessionToken: session.sessionToken },
         data: { expires: getIdleSessionExpiry(now) },
@@ -61,10 +78,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
       return {
         id: payload.sub,
-        email: payload.email,
+        email: session.user.email ?? payload.email,
         sessionToken: session.sessionToken,
-        role: payload.role as AuthUser['role'],
-        designation: payload.designation,
+        role: session.user.role,
+        designation: session.user.designation,
       };
     } catch (error) {
       if (error instanceof UnauthorizedException) {

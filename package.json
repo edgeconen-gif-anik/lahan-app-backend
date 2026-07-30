@@ -15,6 +15,7 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "render-build": "npm run prisma:migrate:deploy && npm run build",
     "admin:promote": "ts-node --transpile-only scripts/promote-admin.ts",
+    "super-admin:promote": "ts-node --transpile-only scripts/promote-super-admin.ts",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
