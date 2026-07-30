@@ -4,6 +4,8 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  Param,
+  ParseUUIDPipe,
   Post,
   Request,
   UnauthorizedException,
@@ -65,6 +67,16 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
     return this.authService.verifyEmail(verifyEmailDto.token);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('users/:id/send-verification-email')
+  @HttpCode(HttpStatus.OK)
+  async sendVerificationEmail(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req,
+  ) {
+    return this.authService.sendVerificationEmailToUser(id, req.user);
   }
 
   @UseGuards(JwtAuthGuard)

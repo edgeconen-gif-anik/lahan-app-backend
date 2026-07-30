@@ -17,6 +17,7 @@ import { getIdleSessionExpiry } from './session-config';
 import { MailService } from '../mail/mail.service';
 import { SignupDto } from './dto/auth.dto';
 import { ApprovalStatus } from '@prisma/client';
+import { AuthUser, requireSuperAdminUser } from './auth-user';
 
 interface GoogleUserDto {
   email: string;
@@ -67,7 +68,9 @@ export class AuthService {
       }
 
       if (!this.canUserLogin(user)) {
-        this.logger.debug(`Login blocked for onboarding user ${normalizedEmail}`);
+        this.logger.debug(
+          `Login blocked for onboarding user ${normalizedEmail}`,
+        );
         return null;
       }
 
@@ -347,9 +350,7 @@ export class AuthService {
     const rawToken = randomBytes(32).toString('hex');
     const hashedToken = this.hashToken(rawToken);
     const identifier = this.getEmailVerifyIdentifier(normalizedEmail);
-    const expires = new Date(
-      Date.now() + EMAIL_VERIFY_TTL_MINUTES * 60 * 1000,
-    );
+    const expires = new Date(Date.now() + EMAIL_VERIFY_TTL_MINUTES * 60 * 1000);
 
     await this.prisma.$transaction([
       this.prisma.user.create({
@@ -450,7 +451,90 @@ export class AuthService {
 
     return {
       message:
-        'Email verified. Your account is waiting for administrator approval.',
+        user.approvalStatus === ApprovalStatus.APPROVED
+          ? 'Email verified. You can now sign in.'
+          : 'Email verified. Your account is waiting for administrator approval.',
+    };
+  }
+
+  async sendVerificationEmailToUser(userId: string, requester: AuthUser) {
+    requireSuperAdminUser(
+      requester,
+      'Only a super admin can send verification emails',
+    );
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        emailVerified: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    if (user.emailVerified) {
+      throw new ConflictException('This email address is already verified');
+    }
+
+    if (!user.email) {
+      throw new BadRequestException('This user does not have an email address');
+    }
+
+    const normalizedEmail = user.email.trim().toLowerCase();
+    const rawToken = randomBytes(32).toString('hex');
+    const hashedToken = this.hashToken(rawToken);
+    const identifier = this.getEmailVerifyIdentifier(normalizedEmail);
+    const expires = new Date(Date.now() + EMAIL_VERIFY_TTL_MINUTES * 60 * 1000);
+
+    await this.prisma.$transaction([
+      this.prisma.verificationToken.deleteMany({
+        where: { identifier },
+      }),
+      this.prisma.verificationToken.create({
+        data: {
+          identifier,
+          token: hashedToken,
+          expires,
+        },
+      }),
+    ]);
+
+    const frontendUrl = this.getFrontendUrl();
+    const verifyUrl = `${frontendUrl}/verify-email?token=${rawToken}`;
+
+    try {
+      const emailSent = await this.mailService.sendEmailVerificationEmail({
+        to: normalizedEmail,
+        verifyUrl,
+        expiresInMinutes: EMAIL_VERIFY_TTL_MINUTES,
+      });
+
+      if (!emailSent) {
+        throw new ServiceUnavailableException(
+          'Email delivery is not configured',
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Unable to send email verification to ${normalizedEmail}`,
+        error,
+      );
+
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
+
+      throw new ServiceUnavailableException(
+        'Unable to send verification email right now. Please try again later.',
+      );
+    }
+
+    return {
+      message: `Verification email sent to ${normalizedEmail}`,
     };
   }
 
@@ -492,9 +576,7 @@ export class AuthService {
     ).replace(/\/$/, '');
   }
 
-  private canUserLogin(user: {
-    approvalStatus?: ApprovalStatus | null;
-  }) {
+  private canUserLogin(user: { approvalStatus?: ApprovalStatus | null }) {
     return user.approvalStatus === ApprovalStatus.APPROVED;
   }
 

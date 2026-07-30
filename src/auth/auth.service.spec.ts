@@ -1,4 +1,6 @@
 import { createHash } from 'crypto';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
@@ -26,11 +28,18 @@ describe('AuthService', () => {
     user: {
       update: jest.fn(),
       create: jest.fn(),
+      findUnique: jest.fn(),
     },
     $transaction: jest.fn(),
   };
   const mailService = {
     sendPasswordResetEmail: jest.fn(),
+    sendEmailVerificationEmail: jest.fn(),
+  };
+  const superAdmin = {
+    id: 'super-admin-1',
+    email: 'owner@example.com',
+    role: Role.SUPER_ADMIN,
   };
 
   beforeEach(() => {
@@ -105,9 +114,9 @@ describe('AuthService', () => {
   it('reports when the email is not registered', async () => {
     usersService.findByEmail.mockResolvedValue(null);
 
-    await expect(
-      service.forgotPassword('missing@example.com'),
-    ).rejects.toThrow('This email is not registered with us.');
+    await expect(service.forgotPassword('missing@example.com')).rejects.toThrow(
+      'This email is not registered with us.',
+    );
 
     expect(prisma.verificationToken.create).not.toHaveBeenCalled();
   });
@@ -165,5 +174,64 @@ describe('AuthService', () => {
       where: { identifier: 'password-reset:user@example.com' },
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a super admin to send a verification email', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'Unverified@Example.com',
+      emailVerified: null,
+    });
+    prisma.verificationToken.deleteMany.mockReturnValue({} as never);
+    prisma.verificationToken.create.mockReturnValue({} as never);
+    prisma.$transaction.mockResolvedValue([]);
+    mailService.sendEmailVerificationEmail.mockResolvedValue(true);
+
+    await expect(
+      service.sendVerificationEmailToUser('user-1', superAdmin),
+    ).resolves.toEqual({
+      message: 'Verification email sent to unverified@example.com',
+    });
+
+    expect(mailService.sendEmailVerificationEmail).toHaveBeenCalledWith({
+      to: 'unverified@example.com',
+      verifyUrl: expect.stringMatching(
+        /^http:\/\/localhost:3000\/verify-email\?token=/,
+      ),
+      expiresInMinutes: 60,
+    });
+    expect(prisma.verificationToken.create).toHaveBeenCalledWith({
+      data: {
+        identifier: 'email-verify:unverified@example.com',
+        token: expect.any(String),
+        expires: expect.any(Date),
+      },
+    });
+  });
+
+  it('does not allow a regular admin to send verification emails', async () => {
+    await expect(
+      service.sendVerificationEmailToUser('user-1', {
+        id: 'admin-1',
+        email: 'admin@example.com',
+        role: Role.ADMIN,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('does not send another email to an already verified user', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'verified@example.com',
+      emailVerified: new Date(),
+    });
+
+    await expect(
+      service.sendVerificationEmailToUser('user-1', superAdmin),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(mailService.sendEmailVerificationEmail).not.toHaveBeenCalled();
   });
 });
