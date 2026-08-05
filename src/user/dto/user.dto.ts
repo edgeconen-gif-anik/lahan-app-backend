@@ -11,6 +11,7 @@ const DesignationEnum = z.enum([
 ]);
 
 const RoleEnum = z.enum(['CREATOR', 'REVIEWER', 'ADMIN', 'SUPER_ADMIN']);
+const AssignableRoleEnum = z.enum(['CREATOR', 'REVIEWER', 'ADMIN']);
 
 const ApprovalStatusEnum = z.enum(['PENDING', 'APPROVED', 'REJECTED']);
 
@@ -70,6 +71,11 @@ export const ApproveUserSchema = z.object({
   designation: DesignationEnum,
 });
 
+export const UpdateUserAccessSchema = z.object({
+  role: AssignableRoleEnum,
+  designation: DesignationEnum,
+});
+
 // ==========================================
 // 5. Generate DTO Classes for NestJS
 // ==========================================
@@ -77,3 +83,4 @@ export class CreateUserDto extends createZodDto(CreateUserSchema) {}
 export class UpdateUserDto extends createZodDto(UpdateUserSchema) {}
 export class QueryUserDto extends createZodDto(QueryUserSchema) {}
 export class ApproveUserDto extends createZodDto(ApproveUserSchema) {}
+export class UpdateUserAccessDto extends createZodDto(UpdateUserAccessSchema) {}

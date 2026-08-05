@@ -30,7 +30,7 @@ export const CreateUserCommitteeSchema = z.object({
   address: z.string().min(3, 'Address is required'),
   fiscalYear: z
     .string()
-    .regex(/^\d{4}\s*[/-]\s*\d{2,3}$/, 'Must be format like 2082/083')
+    .regex(/^\d{4}\s*[/-]\s*\d{2,3}$/, 'Must use YYYY/YYY or YYYY/YY format')
     .optional()
     .or(z.literal('')),
   formedDate: z

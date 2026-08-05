@@ -122,6 +122,52 @@ describe('UserService', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
+  it('allows a super admin to change an existing user to admin', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'existing-user',
+      role: Role.REVIEWER,
+    });
+    prisma.user.update.mockResolvedValue({
+      id: 'existing-user',
+      role: Role.ADMIN,
+      designation: Designation.ENGINEER,
+    });
+
+    await service.updateAccess(
+      'existing-user',
+      {
+        role: Role.ADMIN,
+        designation: Designation.ENGINEER,
+      },
+      superAdmin,
+    );
+
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'existing-user' },
+        data: {
+          role: Role.ADMIN,
+          designation: Designation.ENGINEER,
+        },
+      }),
+    );
+  });
+
+  it('does not allow a regular admin to change existing user access', async () => {
+    await expect(
+      service.updateAccess(
+        'existing-user',
+        {
+          role: Role.ADMIN,
+          designation: Designation.ENGINEER,
+        },
+        admin,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
   it('allows a super admin to delete an unassigned user', async () => {
     prisma.user.findUnique.mockResolvedValue({ role: Role.CREATOR });
     prisma.user.delete.mockResolvedValue({ id: 'creator-1' });

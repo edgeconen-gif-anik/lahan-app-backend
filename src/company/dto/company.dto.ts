@@ -5,13 +5,16 @@ import { CompanyCategory } from '@prisma/client';
 
 // 1. Define the base Zod Schema
 export const CompanySchema = z.object({
-  name: z.string().min(1, 'Name is required').describe('Official Name of the company'),
+  name: z
+    .string()
+    .min(1, 'Name is required')
+    .describe('Official Name of the company'),
   fiscalYear: z
     .string()
-    .regex(/^\d{4}\s*[/-]\s*\d{2,3}$/, 'Must be format like 2082/083')
+    .regex(/^\d{4}\s*[/-]\s*\d{2,3}$/, 'Must use YYYY/YYY or YYYY/YY format')
     .optional()
     .or(z.literal('')),
-  
+
   // PAN is an Int in your DB, but usually 9 digits
   panNumber: z.coerce // coerce ensures string inputs are treated as numbers if needed
     .number()
@@ -20,24 +23,24 @@ export const CompanySchema = z.object({
     .describe('Unique PAN Number'),
 
   address: z.string().min(1, 'Address is required'),
-  
+
   // ✅ FIXED: Added parentheses, matched Prisma name, and made optional
-  voucherNo: z.string().optional(), 
+  voucherNo: z.string().optional(),
 
   officeRegistrationNumber: z
     .union([z.literal(''), z.string().trim().min(1).max(50)])
     .optional()
     .nullable(),
-  
+
   contactPerson: z.string().optional(),
-  
+
   phoneNumber: z
     .union([
       z.literal(''),
       z.string().regex(/^\d{10}$/, 'Mobile number must be exactly 10 digits'),
     ])
     .optional(),
-  
+
   email: z
     .union([z.literal(''), z.string().email()])
     .optional()
@@ -45,12 +48,12 @@ export const CompanySchema = z.object({
 
   registrationDate: z.coerce.date().optional(),
   registrationRequestDate: z.coerce.date().optional(),
-  
+
   // Zod Native Enum validation
   category: z.nativeEnum(CompanyCategory).optional(),
 
   remarks: z.string().optional(),
-  
+
   // Admin flags - usually optional during creation/updates by regular users
   isContracted: z.boolean().default(false).optional(),
   panVerified: z.boolean().default(false).optional(),

@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   ApproveUserDto,
   CreateUserDto,
+  UpdateUserAccessDto,
   UpdateUserDto,
   QueryUserDto,
 } from './dto/user.dto';
@@ -22,7 +23,7 @@ import {
   requireSuperAdminUser,
 } from '../auth/auth-user';
 import {
-  getCurrentNepaliFiscalYear,
+  getActiveFiscalYear,
   getFiscalYearVariants,
   normalizeFiscalYear,
 } from '../setup/fiscal-year';
@@ -321,9 +322,7 @@ export class UserService {
       where: { id: 'default' },
       select: { currentFiscalYear: true },
     });
-    const currentFiscalYear =
-      normalizeFiscalYear(settings?.currentFiscalYear) ??
-      getCurrentNepaliFiscalYear();
+    const currentFiscalYear = getActiveFiscalYear(settings?.currentFiscalYear);
     const fiscalYearStart = getFiscalYearStartDate(currentFiscalYear);
     const fiscalYearEnd = new Date(fiscalYearStart);
     fiscalYearEnd.setUTCFullYear(fiscalYearEnd.getUTCFullYear() + 1);
@@ -460,9 +459,7 @@ export class UserService {
       where: { id: 'default' },
       select: { currentFiscalYear: true },
     });
-    const currentFiscalYear =
-      normalizeFiscalYear(settings?.currentFiscalYear) ??
-      getCurrentNepaliFiscalYear();
+    const currentFiscalYear = getActiveFiscalYear(settings?.currentFiscalYear);
     const fiscalYearVariants = getFiscalYearVariants(currentFiscalYear);
     const projectFiscalYearWhere: Prisma.ProjectWhereInput = {
       fiscalYear: { in: fiscalYearVariants },
@@ -793,6 +790,38 @@ export class UserService {
         approvalStatus: true,
         emailVerified: true,
       },
+    });
+  }
+
+  async updateAccess(
+    id: string,
+    updateUserAccessDto: UpdateUserAccessDto,
+    requester: AuthUser,
+  ) {
+    requireSuperAdminUser(
+      requester,
+      'Only a super admin can change user access',
+    );
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true },
+    });
+
+    if (!existingUser) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+
+    if (existingUser.role === Role.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Super-admin access can only be changed with the operator command',
+      );
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: updateUserAccessDto,
+      select: PUBLIC_USER_SELECT,
     });
   }
 

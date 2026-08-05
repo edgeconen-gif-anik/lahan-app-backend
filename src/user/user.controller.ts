@@ -19,6 +19,7 @@ import { UserService } from './user.service';
 import {
   ApproveUserDto,
   CreateUserDto,
+  UpdateUserAccessDto,
   UpdateUserDto,
   QueryUserDto,
 } from './dto/user.dto';
@@ -75,6 +76,16 @@ export class UserController {
     @Request() req,
   ) {
     return this.userService.approve(id, approveUserDto, req.user);
+  }
+
+  @Patch(':id/access')
+  @UsePipes(ZodValidationPipe)
+  updateAccess(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateUserAccessDto: UpdateUserAccessDto,
+    @Request() req,
+  ) {
+    return this.userService.updateAccess(id, updateUserAccessDto, req.user);
   }
 
   @Delete(':id')

@@ -3,12 +3,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser, requireAdminUser } from '../auth/auth-user';
 import { UpdateSystemSettingDto } from './dto/setup.dto';
 import {
+  getActiveFiscalYear,
   getCurrentNepaliFiscalYear,
   normalizeFiscalYear,
   sortFiscalYearsDescending,
 } from './fiscal-year';
 
 const SETTINGS_ID = 'default';
+
+function getFiscalYearStart(value?: string | null) {
+  return Number(normalizeFiscalYear(value)?.slice(0, 4) ?? 0);
+}
 
 function cleanOptionalText(value?: string | null) {
   const trimmed = value?.trim();
@@ -20,17 +25,38 @@ export class SetupService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getSettings() {
+    const calendarFiscalYear = getCurrentNepaliFiscalYear();
+    const existingSettings = await this.prisma.systemSetting.findUnique({
+      where: { id: SETTINGS_ID },
+    });
+    const existingFiscalYear = normalizeFiscalYear(
+      existingSettings?.currentFiscalYear,
+    );
+    const activeFiscalYear = getActiveFiscalYear(existingFiscalYear);
+    const shouldAdvanceFiscalYear =
+      !existingFiscalYear ||
+      getFiscalYearStart(existingFiscalYear) <
+        getFiscalYearStart(calendarFiscalYear);
+
     const settings = await this.prisma.systemSetting.upsert({
       where: { id: SETTINGS_ID },
       create: {
         id: SETTINGS_ID,
-        currentFiscalYear: getCurrentNepaliFiscalYear(),
+        currentFiscalYear: activeFiscalYear,
       },
-      update: {},
+      update: shouldAdvanceFiscalYear
+        ? { currentFiscalYear: activeFiscalYear }
+        : {},
     });
 
     await this.prisma.fiscalYear.createMany({
-      data: [{ value: settings.currentFiscalYear }],
+      data: Array.from(
+        new Set(
+          [existingFiscalYear, settings.currentFiscalYear].filter(
+            (value): value is string => Boolean(value),
+          ),
+        ),
+      ).map((value) => ({ value })),
       skipDuplicates: true,
     });
 
@@ -44,7 +70,7 @@ export class SetupService {
 
     if (!normalizedFiscalYear) {
       throw new BadRequestException(
-        'Fiscal year must be in 2082/083 or 2082/83 format',
+        'Fiscal year must use YYYY/YYY or YYYY/YY format',
       );
     }
 

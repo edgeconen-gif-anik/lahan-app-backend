@@ -7,6 +7,15 @@ describe('SetupService', () => {
     currentFiscalYear: '2082/083',
   };
 
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-05T00:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('keeps the previous and new fiscal years when the active year changes', async () => {
     const transaction = {
       systemSetting: {
@@ -40,9 +49,17 @@ describe('SetupService', () => {
   });
 
   it('returns registered empty years together with years found in records', async () => {
+    const calendarFiscalYear = '2083/084';
     const prisma = {
       systemSetting: {
-        upsert: jest.fn().mockResolvedValue(settings),
+        findUnique: jest.fn().mockResolvedValue({
+          ...settings,
+          currentFiscalYear: calendarFiscalYear,
+        }),
+        upsert: jest.fn().mockResolvedValue({
+          ...settings,
+          currentFiscalYear: calendarFiscalYear,
+        }),
       },
       fiscalYear: {
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -61,5 +78,29 @@ describe('SetupService', () => {
       '2083/084',
       '2082/083',
     ]);
+  });
+
+  it('advances a stale active fiscal year while retaining it in history', async () => {
+    const prisma = {
+      systemSetting: {
+        findUnique: jest.fn().mockResolvedValue(settings),
+        upsert: jest.fn().mockResolvedValue({
+          ...settings,
+          currentFiscalYear: '2083/084',
+        }),
+      },
+      fiscalYear: {
+        createMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
+    };
+    const service = new SetupService(prisma as never);
+
+    const result = await service.getSettings();
+
+    expect(result.currentFiscalYear).toBe('2083/084');
+    expect(prisma.fiscalYear.createMany).toHaveBeenCalledWith({
+      data: [{ value: '2082/083' }, { value: '2083/084' }],
+      skipDuplicates: true,
+    });
   });
 });

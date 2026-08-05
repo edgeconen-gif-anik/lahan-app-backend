@@ -17,6 +17,28 @@ export function getCurrentNepaliFiscalYear(referenceDate = new Date()) {
   return `${bsStartYear}/${String(bsEndYear).slice(-3)}`;
 }
 
+export function getActiveFiscalYear(
+  configuredFiscalYear?: string | null,
+  referenceDate = new Date(),
+) {
+  const calendarFiscalYear = getCurrentNepaliFiscalYear(referenceDate);
+  const normalizedConfiguredFiscalYear =
+    normalizeFiscalYear(configuredFiscalYear);
+
+  if (!normalizedConfiguredFiscalYear) {
+    return calendarFiscalYear;
+  }
+
+  const configuredStartYear = Number(
+    normalizedConfiguredFiscalYear.slice(0, 4),
+  );
+  const calendarStartYear = Number(calendarFiscalYear.slice(0, 4));
+
+  return configuredStartYear < calendarStartYear
+    ? calendarFiscalYear
+    : normalizedConfiguredFiscalYear;
+}
+
 export function normalizeFiscalYear(value?: string | null) {
   const match = value?.trim().match(FISCAL_YEAR_PATTERN);
   if (!match) {
