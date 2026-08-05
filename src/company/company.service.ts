@@ -17,6 +17,13 @@ import {
   normalizeFiscalYear,
 } from '../setup/fiscal-year';
 
+const INITIATOR_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  designation: true,
+} satisfies Prisma.UserSelect;
+
 @Injectable()
 export class CompanyService {
   constructor(
@@ -69,7 +76,11 @@ export class CompanyService {
         data: {
           ...createData,
           fiscalYear,
+          initiatedById: user.id,
           ...getApprovalStateForSave(user),
+        },
+        include: {
+          initiatedBy: { select: INITIATOR_SELECT },
         },
       });
     } catch (error) {
@@ -132,14 +143,20 @@ export class CompanyService {
     return this.prisma.company.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { projects: true } } },
+      include: {
+        _count: { select: { projects: true } },
+        initiatedBy: { select: INITIATOR_SELECT },
+      },
     });
   }
 
   async findOne(id: string, _user: AuthUser) {
     const company = await this.prisma.company.findFirst({
       where: { id },
-      include: { projects: true },
+      include: {
+        projects: true,
+        initiatedBy: { select: INITIATOR_SELECT },
+      },
     });
     if (!company) throw new NotFoundException(`Company ${id} not found`);
     return company;
@@ -195,6 +212,9 @@ export class CompanyService {
           fiscalYear,
           ...getApprovalStateForSave(user),
         },
+        include: {
+          initiatedBy: { select: INITIATOR_SELECT },
+        },
       });
     } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -220,6 +240,9 @@ export class CompanyService {
       data: {
         approvalStatus: 'APPROVED',
         approvedAt: new Date(),
+      },
+      include: {
+        initiatedBy: { select: INITIATOR_SELECT },
       },
     });
   }

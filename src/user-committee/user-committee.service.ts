@@ -23,6 +23,13 @@ import {
 } from '../setup/fiscal-year';
 import { SetupService } from '../setup/setup.service';
 
+const INITIATOR_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  designation: true,
+} satisfies Prisma.UserSelect;
+
 @Injectable()
 export class UserCommitteeService {
   constructor(
@@ -94,6 +101,7 @@ export class UserCommitteeService {
       data: {
         ...rest,
         fiscalYear,
+        initiatedById: user.id,
         formedDate: formedDate!,
         ...getApprovalStateForSave(user),
         officials: {
@@ -102,6 +110,7 @@ export class UserCommitteeService {
       },
       include: {
         officials: true,
+        initiatedBy: { select: INITIATOR_SELECT },
       },
     });
   }
@@ -144,7 +153,10 @@ export class UserCommitteeService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { officials: true },
+        include: {
+          officials: true,
+          initiatedBy: { select: INITIATOR_SELECT },
+        },
       }),
     ]);
 
@@ -163,6 +175,7 @@ export class UserCommitteeService {
       where: { id, ...getApprovalVisibilityWhere(user) },
       include: {
         officials: true,
+        initiatedBy: { select: INITIATOR_SELECT },
         projects: {
           select: {
             id: true,
@@ -238,6 +251,7 @@ export class UserCommitteeService {
       },
       include: {
         officials: true,
+        initiatedBy: { select: INITIATOR_SELECT },
       },
     });
   }
@@ -254,6 +268,7 @@ export class UserCommitteeService {
       },
       include: {
         officials: true,
+        initiatedBy: { select: INITIATOR_SELECT },
       },
     });
   }
