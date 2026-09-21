@@ -11,6 +11,7 @@ describe('ContractService', () => {
   let service: ContractService;
 
   const prisma = {
+    officerAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
     contract: {
       count: jest.fn(),
       create: jest.fn(),

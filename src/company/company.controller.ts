@@ -1,19 +1,23 @@
-import { 
-  Controller, 
-  Get, 
-  Post, 
-  Body, 
-  Patch, 
-  Param, 
-  Delete, 
-  Query, 
-  ParseUUIDPipe, 
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+  ParseUUIDPipe,
   Request,
   UseGuards,
-  UsePipes // Remove ValidationPipe import
+  UsePipes, // Remove ValidationPipe import
 } from '@nestjs/common';
 import { CompanyService } from './company.service';
-import { CreateCompanyDto, UpdateCompanyDto } from './dto/company.dto';
+import {
+  CreateCompanyDto,
+  UpdateCompanyDto,
+  VerifyCompanyOfficerDto,
+} from './dto/company.dto';
 import { ApprovalStatus, CompanyCategory } from '@prisma/client';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { ZodValidationPipe } from 'nestjs-zod'; // <--- IMPORT THIS
@@ -31,10 +35,13 @@ export class CompanyController {
   @Post()
   @ApiOperation({ summary: 'Register a new company' })
   @ApiResponse({ status: 201, description: 'Company successfully created.' })
-  @ApiResponse({ status: 409, description: 'Conflict: PAN or Email already exists.' })
-  
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict: PAN or Email already exists.',
+  })
+
   // FIX: Use ZodValidationPipe instead of ValidationPipe
-  @UsePipes(ZodValidationPipe) 
+  @UsePipes(ZodValidationPipe)
   create(@Body() createCompanyDto: CreateCompanyDto, @Request() req) {
     return this.companyService.create(createCompanyDto, req.user);
   }
@@ -43,12 +50,14 @@ export class CompanyController {
   // FIND ALL
   // ==========================
   @Get()
-  @ApiOperation({ summary: 'Get all companies with optional search and filtering' })
+  @ApiOperation({
+    summary: 'Get all companies with optional search and filtering',
+  })
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'category', enum: CompanyCategory, required: false })
   @ApiQuery({ name: 'fiscalYear', required: false })
   @ApiQuery({ name: 'approvalStatus', enum: ApprovalStatus, required: false })
-  // No pipe needed here if you aren't validating the query object strictly, 
+  // No pipe needed here if you aren't validating the query object strictly,
   // but if you do use a Query DTO, use ZodValidationPipe
   findAll(
     @Query('search') search?: string,
@@ -79,18 +88,31 @@ export class CompanyController {
     return this.companyService.approve(id, req.user);
   }
 
+  @Patch(':id/verify-officer')
+  @UsePipes(ZodValidationPipe)
+  verifyOfficer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerifyCompanyOfficerDto,
+    @Request() req,
+  ) {
+    return this.companyService.verifyOfficer(id, dto, req.user);
+  }
+
   // ==========================
   // UPDATE
   // ==========================
   @Patch(':id')
   @ApiOperation({ summary: 'Update company details' })
   @ApiResponse({ status: 200, description: 'Company updated successfully.' })
-  @ApiResponse({ status: 409, description: 'Conflict: Updated PAN or Email already in use.' })
-  
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict: Updated PAN or Email already in use.',
+  })
+
   // FIX: Use ZodValidationPipe
   @UsePipes(ZodValidationPipe)
   update(
-    @Param('id', ParseUUIDPipe) id: string, 
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateCompanyDto: UpdateCompanyDto,
     @Request() req,
   ) {

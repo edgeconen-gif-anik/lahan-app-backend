@@ -18,6 +18,7 @@ describe('SetupService', () => {
 
   it('keeps the previous and new fiscal years when the active year changes', async () => {
     const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
       systemSetting: {
         findUnique: jest
           .fn()

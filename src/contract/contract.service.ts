@@ -23,6 +23,7 @@ import {
   requireAdminUser,
 } from '../auth/auth-user';
 import { SetupService } from '../setup/setup.service';
+import { documentSignatories } from '../setup/officer-snapshot';
 import {
   getCurrentNepaliFiscalYear,
   getFiscalYearVariants,
@@ -516,11 +517,23 @@ export class ContractService {
               ? {
                   create: {
                     ...agreement,
+                    ...(await documentSignatories(
+                      tx,
+                      agreement.agreementDate,
+                      agreement,
+                    )),
                     amount: new Prisma.Decimal(agreement.amount),
                   },
                 }
               : undefined,
-            workOrder: workOrder ? { create: workOrder } : undefined,
+            workOrder: workOrder
+              ? {
+                  create: {
+                    ...workOrder,
+                    ...(await documentSignatories(tx, new Date(), workOrder)),
+                  },
+                }
+              : undefined,
           },
           include: CONTRACT_INCLUDE,
         });
@@ -760,6 +773,11 @@ export class ContractService {
                     upsert: {
                       create: {
                         ...agreement,
+                        ...(await documentSignatories(
+                          tx,
+                          agreement.agreementDate ?? new Date(),
+                          agreement,
+                        )),
                         content: agreement.content ?? '',
                         agreementDate: agreement.agreementDate ?? new Date(),
                         amount: new Prisma.Decimal(agreement.amount ?? 0),
@@ -779,6 +797,11 @@ export class ContractService {
                     upsert: {
                       create: {
                         ...workOrder,
+                        ...(await documentSignatories(
+                          tx,
+                          new Date(),
+                          workOrder,
+                        )),
                         content: workOrder.content ?? '',
                         workCompletionDate:
                           workOrder.workCompletionDate ?? new Date(),

@@ -76,30 +76,37 @@ model VerificationToken {
 }
 
 model Company {
-  id                       String           @id @default(uuid())
-  name                     String
-  panNumber                Int
-  fiscalYear               String
-  address                  String
-  contactPerson            String?
-  phoneNumber              String?
-  email                    String?
-  registrationRequestDate  DateTime?
-  registrationDate         DateTime?
-  category                 CompanyCategory?
-  isContracted             Boolean          @default(false)
-  panVerified              Boolean          @default(false)
-  approvalStatus           ApprovalStatus   @default(APPROVED)
-  approvedAt               DateTime?
-  remarks                  String?
-  createdAt                DateTime         @default(now())
-  updatedAt                DateTime         @updatedAt
-  voucherNo                String?
-  officeRegistrationNumber String?
-  initiatedById            String?
-  contracts                Contract[]
-  projects                 Project[]
-  initiatedBy              User?            @relation("CompanyInitiatedBy", fields: [initiatedById], references: [id], onDelete: SetNull)
+  id                             String           @id @default(uuid())
+  name                           String
+  panNumber                      Int
+  fiscalYear                     String
+  address                        String
+  contactPerson                  String?
+  phoneNumber                    String?
+  email                          String?
+  registrationRequestDate        DateTime?
+  registrationDate               DateTime?
+  registrationOfficerName        String?
+  registrationOfficerDesignation String?
+  officerSnapshotAt              DateTime?
+  officerSnapshotSource          String?
+  officerVerifiedById            String?
+  officerVerificationNote        String?
+  officerHistoryLegacy           Boolean          @default(false)
+  category                       CompanyCategory?
+  isContracted                   Boolean          @default(false)
+  panVerified                    Boolean          @default(false)
+  approvalStatus                 ApprovalStatus   @default(APPROVED)
+  approvedAt                     DateTime?
+  remarks                        String?
+  createdAt                      DateTime         @default(now())
+  updatedAt                      DateTime         @updatedAt
+  voucherNo                      String?
+  officeRegistrationNumber       String?
+  initiatedById                  String?
+  contracts                      Contract[]
+  projects                       Project[]
+  initiatedBy                    User?            @relation("CompanyInitiatedBy", fields: [initiatedById], references: [id], onDelete: SetNull)
 
   @@unique([panNumber, fiscalYear])
   @@unique([email, fiscalYear])
@@ -264,6 +271,19 @@ model SystemSetting {
   registrationOfficerDesignation String?
   createdAt                      DateTime @default(now())
   updatedAt                      DateTime @updatedAt
+}
+
+// Append-only observations of official assignments. Never infer pre-migration history.
+model OfficerAssignment {
+  id                             String   @id @default(uuid())
+  effectiveFrom                  DateTime @unique
+  chiefAdministrativeOfficerName String?
+  sectionChiefName               String?
+  registrationOfficerName        String?
+  registrationOfficerDesignation String?
+  recordedById                   String?
+  reason                         String?
+  recordedAt                     DateTime @default(now())
 }
 
 model FiscalYear {

@@ -64,3 +64,12 @@ export class CreateCompanyDto extends createZodDto(CompanySchema) {}
 
 // For Update, we use the .partial() method from Zod
 export class UpdateCompanyDto extends createZodDto(CompanySchema.partial()) {}
+
+export class VerifyCompanyOfficerDto extends createZodDto(
+  z.object({
+    expectedUpdatedAt: z.iso.datetime({ offset: true }),
+    registrationOfficerName: z.string().trim().min(1).max(200),
+    registrationOfficerDesignation: z.string().trim().min(1).max(200),
+    evidence: z.string().trim().min(10).max(2000),
+  }),
+) {}

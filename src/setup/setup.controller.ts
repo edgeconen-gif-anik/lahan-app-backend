@@ -27,6 +27,11 @@ export class SetupController {
     return this.setupService.listFiscalYears();
   }
 
+  @Get('officer-assignments')
+  listOfficerAssignments(@Request() req) {
+    return this.setupService.listOfficerAssignments(req.user);
+  }
+
   @Patch()
   @UsePipes(ZodValidationPipe)
   updateSettings(@Body() dto: UpdateSystemSettingDto, @Request() req) {
