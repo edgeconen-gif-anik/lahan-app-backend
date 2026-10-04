@@ -10,6 +10,7 @@ import {
   Prisma,
   Project,
   ProjectImplantedThrough,
+  ProjectStatus,
 } from '@prisma/client';
 import * as Papa from 'papaparse';
 
@@ -63,6 +64,80 @@ function safeDecimal(val: any): Prisma.Decimal {
   const parsed = Number(cleaned);
   if (isNaN(parsed)) return new Prisma.Decimal(0);
   return new Prisma.Decimal(parsed);
+}
+
+/**
+ * Project status shown in the UI is derived from its contracts:
+ * - no contracts        -> the stored project status
+ * - only ARCHIVED       -> ARCHIVED
+ * - all active COMPLETED -> COMPLETED
+ * - otherwise           -> ONGOING
+ * Mirrors deriveProjectStatusFromContracts() in the frontend.
+ */
+function buildDerivedStatusWhere(
+  status: ProjectStatus,
+): Prisma.ProjectWhereInput {
+  const noContracts: Prisma.ProjectWhereInput = {
+    contracts: { none: {} },
+    status,
+  };
+  const openContract = {
+    status: { notIn: ['ARCHIVED', 'COMPLETED'] },
+  } satisfies Prisma.ContractWhereInput;
+
+  switch (status) {
+    case 'ONGOING':
+      return { OR: [noContracts, { contracts: { some: openContract } }] };
+    case 'COMPLETED':
+      return {
+        OR: [
+          noContracts,
+          {
+            AND: [
+              { contracts: { some: { status: 'COMPLETED' } } },
+              { contracts: { none: openContract } },
+            ],
+          },
+        ],
+      };
+    case 'ARCHIVED':
+      return {
+        OR: [
+          noContracts,
+          {
+            AND: [
+              { contracts: { some: { status: 'ARCHIVED' } } },
+              { contracts: { none: { status: { not: 'ARCHIVED' } } } },
+            ],
+          },
+        ],
+      };
+    default:
+      return noContracts;
+  }
+}
+
+function buildDerivedStatusSql(status: ProjectStatus): Prisma.Sql {
+  const hasContracts = Prisma.sql`EXISTS (SELECT 1 FROM "Contract" c WHERE c."projectId" = "Project"."id")`;
+  const noContracts = Prisma.sql`(NOT ${hasContracts} AND "Project"."status"::text = ${status})`;
+  const hasOpen = Prisma.sql`EXISTS (SELECT 1 FROM "Contract" c WHERE c."projectId" = "Project"."id" AND c."status"::text NOT IN ('ARCHIVED', 'COMPLETED'))`;
+
+  switch (status) {
+    case 'ONGOING':
+      return Prisma.sql`AND (${noContracts} OR ${hasOpen})`;
+    case 'COMPLETED':
+      return Prisma.sql`AND (${noContracts} OR (
+        EXISTS (SELECT 1 FROM "Contract" c WHERE c."projectId" = "Project"."id" AND c."status"::text = 'COMPLETED')
+        AND NOT ${hasOpen}
+      ))`;
+    case 'ARCHIVED':
+      return Prisma.sql`AND (${noContracts} OR (
+        EXISTS (SELECT 1 FROM "Contract" c WHERE c."projectId" = "Project"."id" AND c."status"::text = 'ARCHIVED')
+        AND NOT EXISTS (SELECT 1 FROM "Contract" c WHERE c."projectId" = "Project"."id" AND c."status"::text <> 'ARCHIVED')
+      ))`;
+    default:
+      return Prisma.sql`AND ${noContracts}`;
+  }
 }
 
 const PROJECT_LIST_INCLUDE = {
@@ -271,7 +346,7 @@ export class ProjectService {
     const fiscalYearVariants = await this.resolveFiscalYearFilter(q.fiscalYear);
 
     const where: Prisma.ProjectWhereInput = {
-      ...(q.status && { status: q.status }),
+      ...(q.status && buildDerivedStatusWhere(q.status)),
       ...(fiscalYearVariants.length && {
         fiscalYear: { in: fiscalYearVariants },
       }),
@@ -292,7 +367,7 @@ export class ProjectService {
         this.prisma.$queryRaw<Project[]>(Prisma.sql`
           SELECT * FROM "Project"
           WHERE 1=1
-          ${q.status ? Prisma.sql`AND "status" = ${q.status}` : Prisma.sql``}
+          ${q.status ? buildDerivedStatusSql(q.status) : Prisma.sql``}
           ${
             fiscalYearVariants.length
               ? Prisma.sql`AND "fiscalYear" IN (${Prisma.join(fiscalYearVariants)})`
