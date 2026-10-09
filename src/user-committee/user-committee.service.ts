@@ -120,7 +120,9 @@ export class UserCommitteeService {
     const skip = (page - 1) * limit;
     const fiscalYearVariants = await this.resolveFiscalYearFilter(fiscalYear);
 
-    const where: Prisma.UserCommitteeWhereInput = {
+    // Everything except the approval filter, so the status counts describe the
+    // same result set the user is looking at.
+    const scopeWhere: Prisma.UserCommitteeWhereInput = {
       AND: [
         getApprovalVisibilityWhere(user),
         search
@@ -142,9 +144,11 @@ export class UserCommitteeService {
         fiscalYearVariants.length
           ? { fiscalYear: { in: fiscalYearVariants } }
           : {},
-        approvalStatus ? { approvalStatus } : {},
       ],
     };
+    const where: Prisma.UserCommitteeWhereInput = approvalStatus
+      ? { AND: [scopeWhere, { approvalStatus }] }
+      : scopeWhere;
 
     const [total, committees] = await this.prisma.$transaction([
       this.prisma.userCommittee.count({ where }),
@@ -160,12 +164,26 @@ export class UserCommitteeService {
       }),
     ]);
 
+    const [pending, approved, rejected] = await Promise.all(
+      (['PENDING', 'APPROVED', 'REJECTED'] as const).map((status) =>
+        this.prisma.userCommittee.count({
+          where: { AND: [scopeWhere, { approvalStatus: status }] },
+        }),
+      ),
+    );
+
     return {
       data: committees,
       meta: {
         total,
         page,
-        lastPage: Math.ceil(total / limit),
+        lastPage: Math.max(1, Math.ceil(total / limit)),
+      },
+      counts: {
+        total: pending + approved + rejected,
+        PENDING: pending,
+        APPROVED: approved,
+        REJECTED: rejected,
       },
     };
   }

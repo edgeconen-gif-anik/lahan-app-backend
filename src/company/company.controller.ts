@@ -57,6 +57,19 @@ export class CompanyController {
   @ApiQuery({ name: 'category', enum: CompanyCategory, required: false })
   @ApiQuery({ name: 'fiscalYear', required: false })
   @ApiQuery({ name: 'approvalStatus', enum: ApprovalStatus, required: false })
+  @ApiQuery({
+    name: 'contracted',
+    enum: ['CONTRACTED', 'NON_CONTRACTED'],
+    required: false,
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    description: 'Enables paging; the response becomes { data, meta, counts }',
+  })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'sortBy', required: false })
+  @ApiQuery({ name: 'sortOrder', required: false })
   // No pipe needed here if you aren't validating the query object strictly,
   // but if you do use a Query DTO, use ZodValidationPipe
   findAll(
@@ -64,10 +77,28 @@ export class CompanyController {
     @Query('category') category?: CompanyCategory,
     @Query('fiscalYear') fiscalYear?: string,
     @Query('approvalStatus') approvalStatus?: ApprovalStatus,
+    @Query('contracted') contracted?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
     @Request() req?,
   ) {
     return this.companyService.findAll(
-      { search, category, fiscalYear, approvalStatus },
+      {
+        search,
+        category,
+        fiscalYear,
+        approvalStatus,
+        contracted:
+          contracted === 'CONTRACTED' || contracted === 'NON_CONTRACTED'
+            ? contracted
+            : undefined,
+        page,
+        limit,
+        sortBy,
+        sortOrder,
+      },
       req.user,
     );
   }

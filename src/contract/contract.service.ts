@@ -23,12 +23,21 @@ import {
   requireAdminUser,
 } from '../auth/auth-user';
 import { SetupService } from '../setup/setup.service';
+import { buildPageMeta, resolvePaging } from '../common/pagination';
 import { documentSignatories } from '../setup/officer-snapshot';
 import {
   getCurrentNepaliFiscalYear,
   getFiscalYearVariants,
   normalizeFiscalYear,
 } from '../setup/fiscal-year';
+
+const CONTRACT_SORT_FIELDS = [
+  'createdAt',
+  'contractNumber',
+  'contractAmount',
+  'startDate',
+  'intendedCompletionDate',
+] as const;
 
 const MILESTONE_ORDER: ContractStatus[] = [
   ContractStatus.NOT_STARTED,
@@ -582,6 +591,16 @@ export class ContractService {
       siteInchargeId?: string;
       fiscalYear?: string;
       approvalStatus?: ApprovalStatus;
+      search?: string;
+      status?: ContractStatus;
+      implementor?: 'COMPANY' | 'USER_COMMITTEE';
+      // Only contracts past their intended end date that are not finished.
+      overdue?: boolean;
+      // Paging is opt-in: without `page` the legacy plain array is returned.
+      page?: number | string;
+      limit?: number | string;
+      sortBy?: string;
+      sortOrder?: string;
     },
     user: AuthUser,
   ) {
@@ -593,34 +612,130 @@ export class ContractService {
       siteInchargeId,
       fiscalYear,
       approvalStatus,
+      status,
+      implementor,
     } = params;
+    const search = params.search?.trim();
     const fiscalYearVariants = await this.resolveFiscalYearFilter(fiscalYear);
-
-    return this.prisma.contract.findMany({
-      where: {
-        AND: [
-          getApprovalVisibilityWhere(user),
-          ...(fiscalYearVariants.length
-            ? [
-                {
-                  OR: [
-                    { fiscalYear: { in: fiscalYearVariants } },
-                    { project: { fiscalYear: { in: fiscalYearVariants } } },
-                  ],
-                },
-              ]
-            : []),
-        ],
-        ...(projectId && { projectId }),
-        ...(companyId && { companyId }),
-        ...(userCommitteeId && { userCommitteeId }),
-        ...(userId && { userID: userId }), // schema field is userID
-        ...(siteInchargeId && { siteInchargeId }), // ✅ direct field on Contract
-        ...(approvalStatus && { approvalStatus }),
-      },
-      include: CONTRACT_INCLUDE,
-      orderBy: { createdAt: 'desc' },
+    const containsSearch = (field: string) => ({
+      [field]: { contains: search, mode: 'insensitive' as const },
     });
+
+    // Everything except the milestone filter, so the per-milestone counts
+    // describe the same result set the user is looking at.
+    const baseWhere: Prisma.ContractWhereInput = {
+      AND: [
+        getApprovalVisibilityWhere(user),
+        ...(fiscalYearVariants.length
+          ? [
+              {
+                OR: [
+                  { fiscalYear: { in: fiscalYearVariants } },
+                  { project: { fiscalYear: { in: fiscalYearVariants } } },
+                ],
+              },
+            ]
+          : []),
+        ...(search
+          ? [
+              {
+                OR: [
+                  containsSearch('contractNumber'),
+                  {
+                    project: {
+                      OR: [containsSearch('name'), containsSearch('sNo')],
+                    },
+                  },
+                  { company: containsSearch('name') },
+                  { userCommittee: containsSearch('name') },
+                ],
+              },
+            ]
+          : []),
+        ...(implementor === 'COMPANY' ? [{ companyId: { not: null } }] : []),
+        ...(implementor === 'USER_COMMITTEE'
+          ? [{ userCommitteeId: { not: null } }]
+          : []),
+      ],
+      ...(projectId && { projectId }),
+      ...(companyId && { companyId }),
+      ...(userCommitteeId && { userCommitteeId }),
+      ...(userId && { userID: userId }), // schema field is userID
+      ...(siteInchargeId && { siteInchargeId }), // ✅ direct field on Contract
+      ...(approvalStatus && { approvalStatus }),
+    };
+    const overdueWhere: Prisma.ContractWhereInput = {
+      status: { notIn: [ContractStatus.COMPLETED, ContractStatus.ARCHIVED] },
+      actualCompletionDate: null,
+      intendedCompletionDate: { lt: new Date() },
+    };
+    // The quick "overdue" view narrows the milestone counts too; the milestone
+    // filter itself does not.
+    const listScope: Prisma.ContractWhereInput = params.overdue
+      ? { AND: [baseWhere, overdueWhere] }
+      : baseWhere;
+    const where: Prisma.ContractWhereInput = status
+      ? { AND: [listScope, { status }] }
+      : listScope;
+
+    const sortField = CONTRACT_SORT_FIELDS.find(
+      (field) => field === params.sortBy,
+    );
+    const orderBy: Prisma.ContractOrderByWithRelationInput = {
+      [sortField ?? 'createdAt']: params.sortOrder === 'asc' ? 'asc' : 'desc',
+    };
+
+    const paging = resolvePaging(params.page, params.limit);
+    if (!paging) {
+      return this.prisma.contract.findMany({
+        where,
+        include: CONTRACT_INCLUDE,
+        orderBy,
+      });
+    }
+
+    const [total, data, statusGroups, pendingApprovals, overdueCount] =
+      await Promise.all([
+        this.prisma.contract.count({ where }),
+        this.prisma.contract.findMany({
+          where,
+          include: CONTRACT_INCLUDE,
+          orderBy,
+          skip: paging.skip,
+          take: paging.limit,
+        }),
+        this.prisma.contract.groupBy({
+          by: ['status'],
+          where: listScope,
+          _count: { status: true },
+        }),
+        this.prisma.contract.count({
+          where: {
+            AND: [baseWhere, { approvalStatus: ApprovalStatus.PENDING }],
+          },
+        }),
+        this.prisma.contract.count({
+          where: { AND: [baseWhere, overdueWhere] },
+        }),
+      ]);
+
+    const byStatus = Object.fromEntries(
+      Object.values(ContractStatus).map((value) => [value, 0]),
+    ) as Record<ContractStatus, number>;
+    for (const group of statusGroups) {
+      byStatus[group.status] = group._count.status;
+    }
+
+    return {
+      data,
+      meta: buildPageMeta(total, paging.page, paging.limit),
+      counts: {
+        total: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
+        byStatus,
+        pendingApprovals,
+        overdue: overdueCount,
+      },
+    };
   }
 
   async findOne(id: string, user: AuthUser) {

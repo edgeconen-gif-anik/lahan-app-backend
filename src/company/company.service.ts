@@ -20,6 +20,7 @@ import {
   requireAdminUser,
 } from '../auth/auth-user';
 import { SetupService } from '../setup/setup.service';
+import { buildPageMeta, resolvePaging } from '../common/pagination';
 import {
   getFiscalYearVariants,
   normalizeFiscalYear,
@@ -149,36 +150,137 @@ export class CompanyService {
       category?: CompanyCategory;
       fiscalYear?: string;
       approvalStatus?: ApprovalStatus;
+      contracted?: 'CONTRACTED' | 'NON_CONTRACTED';
+      // Paging is opt-in: without `page` the legacy plain array is returned.
+      page?: number | string;
+      limit?: number | string;
+      sortBy?: string;
+      sortOrder?: string;
     },
     _user: AuthUser,
   ) {
-    const { search, category, fiscalYear, approvalStatus } = params;
+    const { search, category, fiscalYear, approvalStatus, contracted } = params;
     const fiscalYearVariants = await this.resolveFiscalYearFilter(fiscalYear);
-    const where: Prisma.CompanyWhereInput = {
+
+    // Search, category and fiscal year only. Approval and contracted filters
+    // are layered on top so the summary counts can ignore them.
+    const scopeWhere: Prisma.CompanyWhereInput = {
       ...(fiscalYearVariants.length && {
         fiscalYear: { in: fiscalYearVariants },
       }),
+      ...(category && { category }),
     };
 
     if (search) {
       const isNumber = !isNaN(Number(search));
-      where.OR = [
+      scopeWhere.OR = [
         { name: { contains: search, mode: 'insensitive' } },
         { officeRegistrationNumber: { contains: search, mode: 'insensitive' } },
         ...(isNumber ? [{ panNumber: { equals: Number(search) } }] : []),
       ];
     }
-    if (category) where.category = category;
-    if (approvalStatus) where.approvalStatus = approvalStatus;
 
-    return this.prisma.company.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        _count: { select: { projects: true } },
-        initiatedBy: { select: INITIATOR_SELECT },
+    // A company counts as contracted when flagged, or when it has at least one
+    // approved contract.
+    const contractedWhere: Prisma.CompanyWhereInput = {
+      OR: [
+        { isContracted: true },
+        { contracts: { some: { approvalStatus: ApprovalStatus.APPROVED } } },
+      ],
+    };
+    const nonContractedWhere: Prisma.CompanyWhereInput = {
+      AND: [
+        { isContracted: false },
+        { contracts: { none: { approvalStatus: ApprovalStatus.APPROVED } } },
+      ],
+    };
+
+    const where: Prisma.CompanyWhereInput = {
+      AND: [
+        scopeWhere,
+        ...(approvalStatus ? [{ approvalStatus }] : []),
+        ...(contracted === 'CONTRACTED' ? [contractedWhere] : []),
+        ...(contracted === 'NON_CONTRACTED' ? [nonContractedWhere] : []),
+      ],
+    };
+
+    const sortDirection = params.sortOrder === 'asc' ? 'asc' : 'desc';
+    const orderBy: Prisma.CompanyOrderByWithRelationInput =
+      params.sortBy === 'name'
+        ? { name: sortDirection }
+        : params.sortBy === 'registrationRequestDate'
+          ? { registrationRequestDate: sortDirection }
+          : { createdAt: sortDirection };
+    const baseInclude = {
+      _count: { select: { projects: true } },
+      initiatedBy: { select: INITIATOR_SELECT },
+    } satisfies Prisma.CompanyInclude;
+
+    const paging = resolvePaging(params.page, params.limit);
+    if (!paging) {
+      return this.prisma.company.findMany({
+        where,
+        orderBy,
+        include: baseInclude,
+      });
+    }
+
+    const [total, rows, totalInScope, pending, contractedCount, nonContracted] =
+      await Promise.all([
+        this.prisma.company.count({ where }),
+        this.prisma.company.findMany({
+          where,
+          orderBy,
+          skip: paging.skip,
+          take: paging.limit,
+          include: {
+            ...baseInclude,
+            contracts: {
+              where: { approvalStatus: ApprovalStatus.APPROVED },
+              select: { id: true },
+              take: 1,
+            },
+          },
+        }),
+        this.prisma.company.count({ where: scopeWhere }),
+        this.prisma.company.count({
+          where: {
+            AND: [scopeWhere, { approvalStatus: ApprovalStatus.PENDING }],
+          },
+        }),
+        this.prisma.company.count({
+          where: {
+            AND: [
+              scopeWhere,
+              { approvalStatus: ApprovalStatus.APPROVED },
+              contractedWhere,
+            ],
+          },
+        }),
+        this.prisma.company.count({
+          where: {
+            AND: [
+              scopeWhere,
+              { approvalStatus: ApprovalStatus.APPROVED },
+              nonContractedWhere,
+            ],
+          },
+        }),
+      ]);
+
+    return {
+      data: rows.map(({ contracts, ...company }) => ({
+        ...company,
+        hasApprovedContract: contracts.length > 0,
+      })),
+      meta: buildPageMeta(total, paging.page, paging.limit),
+      counts: {
+        total: totalInScope,
+        pending,
+        contracted: contractedCount,
+        nonContracted,
       },
-    });
+    };
   }
 
   async findOne(id: string, _user: AuthUser) {
