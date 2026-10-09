@@ -67,6 +67,8 @@ export function getFiscalYearVariants(value?: string | null) {
   const [startYear, endYearThreeDigit] = normalized.split('/');
   const endYearTwoDigit = endYearThreeDigit.slice(-2);
   const startYearTwoDigit = startYear.slice(-2);
+  const startYearThreeDigit = startYear.slice(-3);
+  const endYearFull = `${startYear.slice(0, -3)}${endYearThreeDigit}`;
 
   return Array.from(
     new Set([
@@ -78,6 +80,12 @@ export function getFiscalYearVariants(value?: string | null) {
       `${startYearTwoDigit}/${endYearTwoDigit}`,
       `${startYearTwoDigit}-${endYearThreeDigit}`,
       `${startYearTwoDigit}-${endYearTwoDigit}`,
+      `${startYear}/${endYearFull}`,
+      `${startYear}-${endYearFull}`,
+      `${startYearThreeDigit}/${endYearThreeDigit}`,
+      `${startYearThreeDigit}/${endYearTwoDigit}`,
+      `${startYearThreeDigit}-${endYearThreeDigit}`,
+      `${startYearThreeDigit}-${endYearTwoDigit}`,
     ]),
   );
 }

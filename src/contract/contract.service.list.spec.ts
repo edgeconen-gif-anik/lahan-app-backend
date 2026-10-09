@@ -98,4 +98,39 @@ describe('ContractService.findAll paging', () => {
       expect.objectContaining({ orderBy: { createdAt: 'asc' } }),
     );
   });
+
+  it('returns the available page when switching to FY 2083/84 with a stale page', async () => {
+    prisma.contract.count.mockResolvedValue(1);
+    const result = await service.findAll(
+      { fiscalYear: '2083/84', page: 5 },
+      admin,
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        data: [{ id: 'c1' }],
+        meta: { total: 1, page: 1, limit: 20, lastPage: 1 },
+      }),
+    );
+    expect(prisma.contract.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 0,
+        take: 20,
+      }),
+    );
+    const where = prisma.contract.findMany.mock.calls[0][0].where;
+    expect(where.AND[1].OR).toEqual([
+      {
+        fiscalYear: {
+          in: expect.arrayContaining(['2083/84', '2083/084', '2083/2084']),
+        },
+      },
+      {
+        project: {
+          fiscalYear: {
+            in: expect.arrayContaining(['2083/84', '2083/084', '2083/2084']),
+          },
+        },
+      },
+    ]);
+  });
 });

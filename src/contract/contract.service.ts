@@ -23,7 +23,11 @@ import {
   requireAdminUser,
 } from '../auth/auth-user';
 import { SetupService } from '../setup/setup.service';
-import { buildPageMeta, resolvePaging } from '../common/pagination';
+import {
+  buildPageMeta,
+  clampPaging,
+  resolvePaging,
+} from '../common/pagination';
 import { documentSignatories } from '../setup/officer-snapshot';
 import {
   getCurrentNepaliFiscalYear,
@@ -694,15 +698,16 @@ export class ContractService {
       });
     }
 
-    const [total, data, statusGroups, pendingApprovals, overdueCount] =
+    const total = await this.prisma.contract.count({ where });
+    const availablePaging = clampPaging(paging, total);
+    const [data, statusGroups, pendingApprovals, overdueCount] =
       await Promise.all([
-        this.prisma.contract.count({ where }),
         this.prisma.contract.findMany({
           where,
           include: CONTRACT_INCLUDE,
           orderBy,
-          skip: paging.skip,
-          take: paging.limit,
+          skip: availablePaging.skip,
+          take: availablePaging.limit,
         }),
         this.prisma.contract.groupBy({
           by: ['status'],
@@ -728,7 +733,7 @@ export class ContractService {
 
     return {
       data,
-      meta: buildPageMeta(total, paging.page, paging.limit),
+      meta: buildPageMeta(total, availablePaging.page, availablePaging.limit),
       counts: {
         total: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
         byStatus,

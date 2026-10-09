@@ -20,7 +20,11 @@ import {
   requireAdminUser,
 } from '../auth/auth-user';
 import { SetupService } from '../setup/setup.service';
-import { buildPageMeta, resolvePaging } from '../common/pagination';
+import {
+  buildPageMeta,
+  clampPaging,
+  resolvePaging,
+} from '../common/pagination';
 import {
   getFiscalYearVariants,
   normalizeFiscalYear,
@@ -32,6 +36,28 @@ const INITIATOR_SELECT = {
   email: true,
   designation: true,
 } satisfies Prisma.UserSelect;
+
+const COMPANY_COUNTS = {
+  select: {
+    projects: true,
+    contracts: { where: { approvalStatus: ApprovalStatus.APPROVED } },
+  },
+} satisfies Prisma.CompanyCountOutputTypeDefaultArgs;
+
+function withContractState<
+  T extends {
+    isContracted?: boolean;
+    _count?: { contracts?: number };
+  },
+>(company: T) {
+  const approvedContractCount = company._count?.contracts ?? 0;
+  return {
+    ...company,
+    approvedContractCount,
+    hasApprovedContract: approvedContractCount > 0,
+    isContracted: Boolean(company.isContracted) || approvedContractCount > 0,
+  };
+}
 
 @Injectable()
 export class CompanyService {
@@ -212,35 +238,30 @@ export class CompanyService {
           ? { registrationRequestDate: sortDirection }
           : { createdAt: sortDirection };
     const baseInclude = {
-      _count: { select: { projects: true } },
+      _count: COMPANY_COUNTS,
       initiatedBy: { select: INITIATOR_SELECT },
     } satisfies Prisma.CompanyInclude;
 
     const paging = resolvePaging(params.page, params.limit);
     if (!paging) {
-      return this.prisma.company.findMany({
+      const rows = await this.prisma.company.findMany({
         where,
         orderBy,
         include: baseInclude,
       });
+      return rows.map(withContractState);
     }
 
-    const [total, rows, totalInScope, pending, contractedCount, nonContracted] =
+    const total = await this.prisma.company.count({ where });
+    const availablePaging = clampPaging(paging, total);
+    const [rows, totalInScope, pending, contractedCount, nonContracted] =
       await Promise.all([
-        this.prisma.company.count({ where }),
         this.prisma.company.findMany({
           where,
           orderBy,
-          skip: paging.skip,
-          take: paging.limit,
-          include: {
-            ...baseInclude,
-            contracts: {
-              where: { approvalStatus: ApprovalStatus.APPROVED },
-              select: { id: true },
-              take: 1,
-            },
-          },
+          skip: availablePaging.skip,
+          take: availablePaging.limit,
+          include: baseInclude,
         }),
         this.prisma.company.count({ where: scopeWhere }),
         this.prisma.company.count({
@@ -269,11 +290,8 @@ export class CompanyService {
       ]);
 
     return {
-      data: rows.map(({ contracts, ...company }) => ({
-        ...company,
-        hasApprovedContract: contracts.length > 0,
-      })),
-      meta: buildPageMeta(total, paging.page, paging.limit),
+      data: rows.map(withContractState),
+      meta: buildPageMeta(total, availablePaging.page, availablePaging.limit),
       counts: {
         total: totalInScope,
         pending,
@@ -288,11 +306,12 @@ export class CompanyService {
       where: { id },
       include: {
         projects: true,
+        _count: COMPANY_COUNTS,
         initiatedBy: { select: INITIATOR_SELECT },
       },
     });
     if (!company) throw new NotFoundException(`Company ${id} not found`);
-    return company;
+    return withContractState(company);
   }
 
   async update(id: string, data: UpdateCompanyDto, user: AuthUser) {

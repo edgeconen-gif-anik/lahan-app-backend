@@ -45,3 +45,13 @@ export function buildPageMeta(
     lastPage: Math.max(1, Math.ceil(total / limit)),
   };
 }
+
+/** Keep a page carried over from another filter within the available results. */
+export function clampPaging(
+  paging: NonNullable<ReturnType<typeof resolvePaging>>,
+  total: number,
+) {
+  const lastPage = Math.max(1, Math.ceil(total / paging.limit));
+  const page = Math.min(paging.page, lastPage);
+  return { ...paging, page, skip: (page - 1) * paging.limit };
+}

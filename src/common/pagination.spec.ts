@@ -1,4 +1,4 @@
-import { buildPageMeta, resolvePaging } from './pagination';
+import { buildPageMeta, clampPaging, resolvePaging } from './pagination';
 
 describe('pagination helpers', () => {
   it('returns null (legacy array mode) when no page is given', () => {
@@ -23,5 +23,18 @@ describe('pagination helpers', () => {
   it('always reports at least one page', () => {
     expect(buildPageMeta(0, 1, 20).lastPage).toBe(1);
     expect(buildPageMeta(41, 1, 20).lastPage).toBe(3);
+  });
+
+  it('clamps stale page numbers after changing filters or fiscal years', () => {
+    expect(clampPaging({ page: 5, limit: 20, skip: 80 }, 21)).toEqual({
+      page: 2,
+      limit: 20,
+      skip: 20,
+    });
+    expect(clampPaging({ page: 5, limit: 20, skip: 80 }, 0)).toEqual({
+      page: 1,
+      limit: 20,
+      skip: 0,
+    });
   });
 });
