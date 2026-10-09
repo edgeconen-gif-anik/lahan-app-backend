@@ -12,6 +12,7 @@ import { UserCommitteeService } from './user-committee/user-committee.service';
 import { UserCommitteeController } from './user-committee/user-committee.controller';
 import { SetupModule } from './setup/setup.module';
 import { FuelModule } from './fuel/fuel.module';
+import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { FuelModule } from './fuel/fuel.module';
     AuthModule,
     SetupModule,
     FuelModule,
+    SearchModule,
   ],
   controllers: [AppController, UserCommitteeController],
   providers: [AppService, UserCommitteeService],
